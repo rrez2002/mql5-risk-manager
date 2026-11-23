@@ -3,13 +3,14 @@ input uint InpProtectionGraceSeconds=15; // Time allowed to repair new exposure
 
 struct GuardLeg
   {
-   long id,epoch,order;
+   long id,epoch,order,latest;
+   double accepted;
    double volume,net,prohibited;
   };
 GuardLeg legs[];
 string guardPrefix;
 int owner=INVALID_HANDLE;
-bool historyDirty=true,guardReady=false;
+bool historyDirty=true,guardReady=false,dayActivity=false;
 datetime historyDay=0,lastEntry=0,lossUntil=0,dayLock=0;
 long lastOrder=0;
 double cashFlow=0;
@@ -32,6 +33,16 @@ void GuardInit()
    for(int i=0;i<StringLen(server);i++) hash=(hash^StringGetCharacter(server,i))*16777619;
    guardPrefix=StringFormat("S3.%u.%I64d.",hash,AccountInfoInteger(ACCOUNT_LOGIN));
   }
+// All chart instances serialize panel submissions and controller corrections.
+class GuardAccess
+  {
+private:
+   int handle;
+public:
+   GuardAccess() { handle=FileOpen(GuardKey("operation"),FILE_READ|FILE_WRITE|FILE_BIN); }
+   ~GuardAccess() { if(handle!=INVALID_HANDLE) FileClose(handle); }
+   bool Acquired() { return handle!=INVALID_HANDLE; }
+  };
 bool Allowed()
   {
    return TerminalInfoInteger(TERMINAL_CONNECTED) && TerminalInfoInteger(TERMINAL_TRADE_ALLOWED)
@@ -57,7 +68,7 @@ bool Replay(datetime now,datetime day)
    if(!historyDirty && day==historyDay && count==historyCount) return true;
    if(!HistorySelect(0,now)) return false;
    ArrayFree(legs);
-   lastEntry=0; lastOrder=0; lossUntil=0; cashFlow=0;
+   lastEntry=0; lastOrder=0; lossUntil=0; cashFlow=0; dayActivity=false;
    int streak=0;
    for(int j=0;j<HistoryDealsTotal();j++)
      {
@@ -66,6 +77,7 @@ bool Replay(datetime now,datetime day)
       datetime when=(datetime)HistoryDealGetInteger(t,DEAL_TIME);
       long type=HistoryDealGetInteger(t,DEAL_TYPE);
       double profit=HistoryDealGetDouble(t,DEAL_PROFIT);
+      if(type!=DEAL_TYPE_BALANCE && when>=day) dayActivity=true;
       if(type==DEAL_TYPE_BALANCE && when>=day) cashFlow+=profit;
       if(type!=DEAL_TYPE_BUY && type!=DEAL_TYPE_SELL) continue;
       long id=HistoryDealGetInteger(t,DEAL_POSITION_ID),order=HistoryDealGetInteger(t,DEAL_ORDER);
@@ -77,6 +89,8 @@ bool Replay(datetime now,datetime day)
          ZeroMemory(legs[i]); legs[i].id=id;
         }
       double old=legs[i].volume,qty=HistoryDealGetDouble(t,DEAL_VOLUME);
+      long side=HistoryDealGetInteger(t,DEAL_ENTRY);
+      if(old==0 && side!=DEAL_ENTRY_IN) return false;
       double delta=(type==DEAL_TYPE_BUY?qty:-qty);
       double closed=old*delta<0?MathMin(MathAbs(old),qty):0;
       double added=NormalizeDouble(qty-closed,8);
@@ -92,15 +106,30 @@ bool Replay(datetime now,datetime day)
         }
       if(added>0)
         {
-         if(MathAbs(old)<=closed+1e-9) legs[i].epoch=(long)t;
-         bool barred=(order!=lastOrder && when-lastEntry<120) || when<lossUntil
-                   || (dayLock>=day && when>=dayLock);
+         if(MathAbs(old)<=closed+1e-9)
+           { legs[i].epoch=(long)t; legs[i].accepted=0; }
+         datetime dealDay=when-when%86400;
+         datetime lockedAt=(datetime)Stored(GuardKey("D"+IntegerToString(dealDay)));
+         bool barred=(order!=legs[i].order && order!=lastOrder && when-lastEntry<120) || when<lossUntil
+                   || (lockedAt>0 && when>=lockedAt);
          if(barred || (order==legs[i].order && legs[i].prohibited>0)) legs[i].prohibited+=added;
          legs[i].order=order;
          legs[i].net+=fees*added/qty;
          lastEntry=when; lastOrder=order;
         }
       legs[i].volume=NormalizeDouble(old+delta,8);
+      legs[i].latest=(long)t;
+      string checkpoint=GuardKey(IntegerToString((long)t)+"v");
+      legs[i].accepted=MathMin(legs[i].accepted,MathAbs(legs[i].volume));
+      if(GlobalVariableCheck(checkpoint)) legs[i].accepted=Stored(checkpoint);
+      legs[i].prohibited=MathMax(legs[i].prohibited,Stored(GuardKey(IntegerToString((long)t)+"x")));
+      legs[i].prohibited=MathMin(legs[i].prohibited,MathAbs(legs[i].volume)-legs[i].accepted);
+      if(legs[i].volume==0)
+        {
+         int end=ArraySize(legs)-1;
+         if(i!=end) legs[i]=legs[end];
+         ArrayResize(legs,end);
+        }
      }
    historyDirty=false; historyCount=count; historyDay=day;
    return true;
@@ -109,7 +138,7 @@ bool GuardRefresh()
   {
    guardReady=false;
    if(!TerminalInfoInteger(TERMINAL_CONNECTED)) return false;
-   datetime now=TimeCurrent(),day=now-now%86400;
+   datetime now=TimeTradeServer(),day=now-now%86400;
    if(now<=0) return false;
    string base=GuardKey("B"+IntegerToString(day)),lock=GuardKey("D"+IntegerToString(day));
    dayLock=(datetime)Stored(lock);
@@ -118,7 +147,8 @@ bool GuardRefresh()
    if(!MathIsValidNumber(equity)) return false;
    if(!GlobalVariableCheck(base))
      {
-      if(now!=day)
+      bool flatSinceMidnight=!dayActivity && PositionsTotal()==0 && ArraySize(legs)==0;
+      if((now!=day || TimeCurrent()!=day) && !flatSinceMidnight)
         {
          if(!dayLock && !Save(lock,now)) return false;
          dayLock=(datetime)Stored(lock);
@@ -148,13 +178,21 @@ bool Loss(string s,bool buy,double v,double entry,double sl,double &sum)
    if(!OrderCalcProfit(buy?ORDER_TYPE_BUY:ORDER_TYPE_SELL,s,v,entry,sl,pnl) || !MathIsValidNumber(pnl)) return false;
    sum+=MathMax(0,-pnl); return true;
   }
-bool Portfolio(double &sum)
+bool Portfolio(double &sum,long through=LONG_MAX)
   {
    for(int i=0;i<PositionsTotal();i++)
      {
       if(!PositionGetTicket(i)) return false;
-      if(!Loss(PositionGetString(POSITION_SYMBOL),PositionGetInteger(POSITION_TYPE)==POSITION_TYPE_BUY,
-               PositionGetDouble(POSITION_VOLUME),PositionGetDouble(POSITION_PRICE_OPEN),PositionGetDouble(POSITION_SL),sum)) return false;
+      int leg=FindLeg(PositionGetInteger(POSITION_IDENTIFIER));
+      if(leg<0) return false;
+      double vol=PositionGetDouble(POSITION_VOLUME);
+      if(MathAbs(MathAbs(legs[leg].volume)-vol)>1e-8) return false;
+      if(legs[leg].latest>through) vol=MathMin(vol,legs[leg].accepted);
+      if(vol<=0) continue;
+      bool buy=PositionGetInteger(POSITION_TYPE)==POSITION_TYPE_BUY;
+      double sl=PositionGetDouble(POSITION_SL),best=Stored(LegKey(leg)+"s");
+      if(best>0 && (buy?sl<best:sl>best)) return false;
+      if(!Loss(PositionGetString(POSITION_SYMBOL),buy,vol,PositionGetDouble(POSITION_PRICE_OPEN),sl,sum)) return false;
      }
    for(int i=0;i<OrdersTotal();i++)
      {
@@ -164,6 +202,7 @@ bool Portfolio(double &sum)
       if(type<ORDER_TYPE_BUY_LIMIT || type>ORDER_TYPE_SELL_STOP_LIMIT) return false;
       double entry=OrderGetDouble(ORDER_PRICE_OPEN),limit=OrderGetDouble(ORDER_PRICE_STOPLIMIT);
       if(limit>0) entry=buy?MathMax(entry,limit):MathMin(entry,limit);
+      if((buy?OrderGetDouble(ORDER_SL)>=entry:OrderGetDouble(ORDER_SL)<=entry)) return false;
       if(!Loss(OrderGetString(ORDER_SYMBOL),buy,OrderGetDouble(ORDER_VOLUME_CURRENT),entry,OrderGetDouble(ORDER_SL),sum)) return false;
      }
    return sum<=AccountInfoDouble(ACCOUNT_EQUITY)*0.02;
@@ -179,15 +218,45 @@ int EarlierPositions(string s,long opened,ulong ticket)
      }
    return n;
   }
+// An acknowledged order can remain at the exchange after the local request returns.
+bool RequestOutstanding()
+  {
+   long high=(long)Stored(GuardKey("orderHi")),low=(long)Stored(GuardKey("orderLo"));
+   ulong ticket=((ulong)high<<32)|(ulong)low;
+   if(ticket==0) return false;
+   if(OrderSelect(ticket))
+     {
+      if(OrderGetInteger(ORDER_TYPE)<=ORDER_TYPE_SELL) return true;
+      // A visible pending order is now included in Portfolio.
+     }
+   else if(!HistoryOrderSelect(ticket)) return true;
+   else
+     {
+      long state=HistoryOrderGetInteger(ticket,ORDER_STATE);
+      if(state!=ORDER_STATE_FILLED && state!=ORDER_STATE_CANCELED && state!=ORDER_STATE_REJECTED && state!=ORDER_STATE_EXPIRED)
+         return true;
+     }
+   return !Save(GuardKey("orderHi"),0) || !Save(GuardKey("orderLo"),0);
+  }
 bool GuardEntry(bool buy,bool market,double volume,double entry,double sl,double tp)
   {
-   if(owner==INVALID_HANDLE) { SetStatus("Use the controller chart for entries",C_WARN); return false; }
+
    string why="";
    if(!Allowed() || !GuardRefresh()) why="Guard unavailable";
+   else if(!GlobalVariableCheck(GuardKey("installed"))) why="Controller initializing";
    else if(dayLock) why="Daily equity lock";
    else if(TimeCurrent()<lossUntil) why="Completed-loss lock";
-   else if(TimeCurrent()-lastEntry<120 || Stored(GuardKey("reserved"))>TimeCurrent()) why="Entry interval or request pending";
+   else if(RequestOutstanding() || TimeCurrent()-lastEntry<120 || Stored(GuardKey("reserved"))>TimeCurrent()) why="Entry interval or request pending";
    else if(EarlierPositions(_Symbol,LONG_MAX,0)>=2) why="Symbol position limit";
+   long mode=SymbolInfoInteger(_Symbol,SYMBOL_TRADE_MODE);
+   if(mode!=SYMBOL_TRADE_MODE_FULL && mode!=(buy?SYMBOL_TRADE_MODE_LONGONLY:SYMBOL_TRADE_MODE_SHORTONLY))
+      why="Symbol trading restricted";
+   if(AccountInfoInteger(ACCOUNT_MARGIN_MODE)!=ACCOUNT_MARGIN_MODE_RETAIL_HEDGING && PositionSelect(_Symbol))
+     {
+      double old=PositionGetDouble(POSITION_SL);
+      if((PositionGetInteger(POSITION_TYPE)==POSITION_TYPE_BUY)==buy && old>0 && (buy?sl<old:sl>old))
+         why="Netting order would loosen existing stop";
+     }
    double sum=0;
    if(why=="" && (!Loss(_Symbol,buy,volume,entry,sl,sum) || !Portfolio(sum))) why="Account risk exceeds limit or is unknown";
    double gap=GuardGap(_Symbol);
@@ -205,15 +274,18 @@ double GuardGap(string s)
    return SymbolInfoDouble(s,SYMBOL_POINT)*MathMax(SymbolInfoInteger(s,SYMBOL_TRADE_STOPS_LEVEL),SymbolInfoInteger(s,SYMBOL_TRADE_FREEZE_LEVEL));
   }
 string LegKey(int i) { return GuardKey(IntegerToString(legs[i].epoch)); }
-bool RetrySlot(string key)
+bool RetrySlot(string key,double intent)
   {
    double last=Stored(key);
    if(last>TimeCurrent()) return false;
-   return Save(key,TimeCurrent()+10);
+   double attempts=Stored(key+"n");
+   if(Stored(key+"i")!=intent) attempts=0;
+   if(attempts>=3) return false;
+   return Save(key+"i",intent) && Save(key+"n",attempts+1) && Save(key,TimeCurrent()+10);
   }
 bool GuardStop(ulong t,double candidate)
   {
-   if(owner==INVALID_HANDLE || !guardReady || !Allowed() || !PositionSelectByTicket(t)) return false;
+   if(!guardReady || !Allowed() || !PositionSelectByTicket(t)) return false;
    int i=FindLeg(PositionGetInteger(POSITION_IDENTIFIER));
    if(i<0) return false;
    string s=PositionGetString(POSITION_SYMBOL),key=LegKey(i);
@@ -224,8 +296,11 @@ bool GuardStop(ulong t,double candidate)
    if(limit<=0 || target<=0 || (buy?target<limit:target>limit) ||
       (saved>0 && (buy?target<saved:target>saved)) || (sl>0 && (buy?target<=sl:target>=sl))) return false;
    MqlTick q;
-   if(!SymbolInfoTick(s,q) || (buy?q.bid-target:target-q.ask)<=GuardGap(s) || !RetrySlot(key+"m")) return false;
-   return Done(corrective,corrective.PositionModify(t,target,PositionGetDouble(POSITION_TP)));
+   if(SymbolInfoInteger(s,SYMBOL_TRADE_MODE)==SYMBOL_TRADE_MODE_DISABLED || !SymbolInfoTick(s,q) || (buy?q.bid-target:target-q.ask)<=GuardGap(s) || !RetrySlot(key+"m",target)) return false;
+   bool ok=Done(corrective,corrective.PositionModify(t,target,PositionGetDouble(POSITION_TP)));
+   if(ok && PositionSelectByTicket(t) && PositionGetDouble(POSITION_SL)==target)
+     { Save(key+"s",target); Save(key+"mn",0); }
+   return ok;
   }
 bool Reduce(ulong t,double amount,string key)
   {
@@ -234,9 +309,9 @@ bool Reduce(ulong t,double amount,string key)
    double vol=PositionGetDouble(POSITION_VOLUME),step=SymbolInfoDouble(s,SYMBOL_VOLUME_STEP);
    if(step<=0 || !corrective.SetTypeFillingBySymbol(s)) return false;
    double part=NormalizeDouble(MathFloor((MathMin(amount,vol)+1e-9)/step)*step,8);
-   if(part<=0 || (part<vol && (part<SymbolInfoDouble(s,SYMBOL_VOLUME_MIN) ||
+   if(SymbolInfoInteger(s,SYMBOL_TRADE_MODE)==SYMBOL_TRADE_MODE_DISABLED || part<=0 || (part<vol && (part<SymbolInfoDouble(s,SYMBOL_VOLUME_MIN) ||
       vol-part+1e-9<SymbolInfoDouble(s,SYMBOL_VOLUME_MIN)))) return false;
-   if(!RetrySlot(key+"c")) return false;
+   if(!RetrySlot(key+"c",vol)) return false;
    if(part==vol) return Done(corrective,corrective.PositionClose(t,InpSlippage));
    if(AccountInfoInteger(ACCOUNT_MARGIN_MODE)==ACCOUNT_MARGIN_MODE_RETAIL_HEDGING)
       return Done(corrective,corrective.PositionClosePartial(t,part,InpSlippage));
@@ -270,7 +345,8 @@ void GuardPosition(ulong t,bool first)
    bool protectedSL=sl>0 && (buy?sl>=target:sl<=target);
    if(protectedSL) { if(!Save(key+"s",sl)) return; }
    else GuardStop(t,target);
-   double accepted=MathMin(vol,Stored(key+"v"));
+   string checkpoint=GuardKey(IntegerToString(legs[i].latest));
+   double accepted=MathMin(vol,legs[i].accepted);
    if(first) accepted=vol;
    double extra=NormalizeDouble(vol-accepted,8);
    double grace=Stored(key+"g");
@@ -282,15 +358,19 @@ void GuardPosition(ulong t,bool first)
      {
       if(EarlierPositions(s,opened,t)>=2) banned=extra;
       double risk=0;
-      if(protectedSL && !Portfolio(risk)) banned=extra;
-      if(missing && TimeCurrent()>=grace+InpProtectionGraceSeconds) banned=extra;
+      if(protectedSL && !Portfolio(risk,legs[i].latest)) banned=extra;
+      if(missing && TimeCurrent()>=grace+MathMin(InpProtectionGraceSeconds,300)) banned=extra;
      }
    if(banned>0)
      {
-      if(!Save(key+"v",MathMin(accepted,vol-banned))) return;
+      if(!Save(checkpoint+"x",banned) || !Save(checkpoint+"v",accepted)) return;
+      legs[i].prohibited=MathMax(legs[i].prohibited,banned);
       Reduce(t,banned,key);
      }
-   else if(!missing || first || vol<Stored(key+"v")) Save(key+"v",missing?accepted:vol);
+   else if(!missing || first)
+     {
+      if(Save(checkpoint+"v",vol)) { legs[i].accepted=vol; legs[i].prohibited=0; }
+     }
   }
 void GuardCycle()
   {
@@ -299,9 +379,11 @@ void GuardCycle()
       owner=FileOpen(GuardKey("owner"),FILE_READ|FILE_WRITE|FILE_BIN);
       if(owner==INVALID_HANDLE) return;
       historyDirty=true;
+      corrective.SetExpertMagicNumber(InpMagic); corrective.SetDeviationInPoints(InpSlippage);
       Print("Account enforcement controller active on ",_Symbol);
      }
-   if(!GuardRefresh()) return;
+   GuardAccess access;
+   if(!access.Acquired() || !GuardRefresh()) return;
    bool first=!GlobalVariableCheck(GuardKey("installed"));
    for(int j=PositionsTotal()-1;j>=0;j--) GuardPosition(PositionGetTicket(j),first);
    if(first && guardReady) Save(GuardKey("installed"),1);
@@ -310,7 +392,7 @@ void GuardCycle()
      {
       ulong t=OrderGetTicket(j);
       if(t && OrderGetInteger(ORDER_TYPE)>=ORDER_TYPE_BUY_LIMIT && OrderGetInteger(ORDER_TYPE)<=ORDER_TYPE_SELL_STOP_LIMIT &&
-         RetrySlot(GuardKey(IntegerToString((long)t)+"d")))
+         RetrySlot(GuardKey(IntegerToString((long)t)+"d"),1))
          Done(corrective,corrective.OrderDelete(t));
      }
   }

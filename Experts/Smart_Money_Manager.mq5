@@ -1155,6 +1155,8 @@ void DefaultLevels(ENUM_ORDER_TYPE t,double &entry,double &sl,double &tp)
 
 bool ExecutePlan(ENUM_ORDER_TYPE type,double entry,double sl,double tp)
   {
+   GuardAccess access;
+   if(!access.Acquired()) { SetStatus("Account trade operation in progress",C_WARN); return false; }
    UpdateStats(true);
    if(!CanTrade()) return false;
 
@@ -1223,6 +1225,13 @@ bool ExecutePlan(ENUM_ORDER_TYPE type,double entry,double sl,double tp)
       default: break;
      }
 
+   ulong submitted=trade.ResultOrder();
+   if(submitted>0)
+     {
+      Save(GuardKey("orderHi"),(double)(submitted>>32));
+      Save(GuardKey("orderLo"),(double)(submitted&0xFFFFFFFF));
+     }
+   if(ok && !mkt && submitted>0 && OrderSelect(submitted)) Save(GuardKey("reserved"),0);
    if(ok && (trade.ResultRetcode()==TRADE_RETCODE_DONE || trade.ResultRetcode()==TRADE_RETCODE_DONE_PARTIAL || trade.ResultRetcode()==TRADE_RETCODE_PLACED))
      {
       SetStatus(OrderName(type)+" "+DoubleToString(lot,2)+" lots @ "+DoubleToString(mkt? trade.ResultPrice() : entry,dg),C_ACCENT);
@@ -1288,6 +1297,8 @@ void CloseByProfit(bool winners)
 
 void PartialCloseAll()
   {
+   GuardAccess access;
+   if(!access.Acquired()) return;
    int n=0;
    double mn=SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_MIN);
    trade.SetExpertMagicNumber(InpMagic);
@@ -1298,13 +1309,15 @@ void PartialCloseAll()
       double vol=PositionGetDouble(POSITION_VOLUME);
       double part=NormalizeLot(vol*InpPartialPct/100.0);
       if(part>=vol || vol-part<mn) continue; // keep at least the minimum lot
-      if(Allowed() && Done(trade,trade.PositionClosePartial(t,part,InpSlippage))) n++;
+      if(Reduce(t,part,GuardKey(IntegerToString((long)t)+"p"))) n++;
      }
    SetStatus("Partial close on "+IntegerToString(n)+" position(s)",n>0? C_ACCENT : C_WARN);
   }
 
 void BreakEvenAll()
   {
+   GuardAccess access;
+   if(!access.Acquired() || !GuardRefresh()) return;
    int n=0;
    int dg=(int)SymbolInfoInteger(_Symbol,SYMBOL_DIGITS);
    for(int i=PositionsTotal()-1;i>=0;i--)
@@ -1314,7 +1327,6 @@ void BreakEvenAll()
       long type=PositionGetInteger(POSITION_TYPE);
       double op=PositionGetDouble(POSITION_PRICE_OPEN);
       double sl=PositionGetDouble(POSITION_SL);
-      double tp=PositionGetDouble(POSITION_TP);
       double bid=SymbolInfoDouble(_Symbol,SYMBOL_BID);
       double ask=SymbolInfoDouble(_Symbol,SYMBOL_ASK);
       if(type==POSITION_TYPE_BUY)
@@ -1336,6 +1348,8 @@ void BreakEvenAll()
 //+------------------------------------------------------------------+
 void ManagePositions()
   {
+   GuardAccess access;
+   if(!access.Acquired() || !GuardRefresh()) return;
    if(!InpUseBE && !InpUseTrail) return;
    int dg=(int)SymbolInfoInteger(_Symbol,SYMBOL_DIGITS);
    double bid=SymbolInfoDouble(_Symbol,SYMBOL_BID);
@@ -1349,7 +1363,6 @@ void ManagePositions()
       long type=PositionGetInteger(POSITION_TYPE);
       double op=PositionGetDouble(POSITION_PRICE_OPEN);
       double sl=PositionGetDouble(POSITION_SL);
-      double tp=PositionGetDouble(POSITION_TP);
 
       if(type==POSITION_TYPE_BUY)
         {
@@ -1719,12 +1732,14 @@ void UpdatePanel()
    SetTxt("v_chk",chk,gate? C_WARN : C_MUTED);
 
    // status line
-   if(gLocked) SetStatus("LOCKED: "+gLockReason,C_SELL);
+   if(dayLock && historyDay==TimeCurrent()-TimeCurrent()%86400) SetStatus("LOCKED: Account daily equity guard",C_SELL);
+   else if(TimeCurrent()<lossUntil) SetStatus("LOCKED: Completed-loss cooldown",C_SELL);
+   else if(gLocked) SetStatus("LOCKED: "+gLockReason,C_SELL);
    else if(gWarn!="") SetStatus("ALERT: "+gWarn,C_WARN);
    else if(StringFind(gStatus,"LOCKED")==0 || StringFind(gStatus,"ALERT:")==0) SetStatus("Ready",C_ACCENT);
 
    // order buttons look disabled while locked / gated
-   bool off=(gLocked || gate);
+   bool off=(dayLock!=0 || TimeCurrent()<lossUntil || gLocked || gate);
    color dis=C_BAR_BG;
    ObjectSetInteger(0,PFX+"btn_buy",OBJPROP_BGCOLOR,off? dis : C_BUY);
    ObjectSetInteger(0,PFX+"btn_sell",OBJPROP_BGCOLOR,off? dis : C_SELL);
@@ -1788,7 +1803,8 @@ void OnTimer()
   {
    static int cnt=0;
    cnt++;
-   if(historyDirty || cnt%4==0) { GuardCycle(); if(owner!=INVALID_HANDLE) ManagePositions(); }
+   if(cnt%4==0 || (owner!=INVALID_HANDLE && historyDirty)) GuardCycle();
+   if(cnt%4==0) ManagePositions();
    if(cnt%240==0) RefreshNews();   // every 60 s
    int headlineTicks=MathMax(1,MathMin(60,InpHeadlineRefreshMinutes))*240;
    if(cnt%headlineTicks==0) RefreshHeadlines();
