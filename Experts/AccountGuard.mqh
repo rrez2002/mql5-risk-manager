@@ -4,7 +4,7 @@ input uint InpProtectionGraceSeconds=15; // Time allowed to repair new exposure
 struct GuardLeg
   {
    long id,epoch,order,latest;
-   double accepted;
+   double accepted,grandfathered;
    double volume,net,prohibited;
   };
 GuardLeg legs[];
@@ -12,7 +12,7 @@ string guardPrefix;
 int owner=INVALID_HANDLE;
 bool historyDirty=true,guardReady=false,dayActivity=false;
 datetime historyDay=0,lastEntry=0,lossUntil=0,dayLock=0;
-long lastOrder=0;
+long lastOrder=0,lastEntryMsc=0;
 double cashFlow=0;
 int historyCount=-1;
 CTrade corrective;
@@ -68,7 +68,7 @@ bool Replay(datetime now,datetime day)
    if(!historyDirty && day==historyDay && count==historyCount) return true;
    if(!HistorySelect(0,now)) return false;
    ArrayFree(legs);
-   lastEntry=0; lastOrder=0; lossUntil=0; cashFlow=0; dayActivity=false;
+   lastEntry=0; lastEntryMsc=0; lastOrder=0; lossUntil=0; cashFlow=0; dayActivity=false;
    int streak=0;
    for(int j=0;j<HistoryDealsTotal();j++)
      {
@@ -107,21 +107,23 @@ bool Replay(datetime now,datetime day)
       if(added>0)
         {
          if(MathAbs(old)<=closed+1e-9)
-           { legs[i].epoch=(long)t; legs[i].accepted=0; }
+           { legs[i].epoch=(long)t; legs[i].accepted=0; legs[i].grandfathered=0; }
          datetime dealDay=when-when%86400;
          datetime lockedAt=(datetime)Stored(GuardKey("D"+IntegerToString(dealDay)));
-         bool barred=(order!=legs[i].order && order!=lastOrder && when-lastEntry<120) || when<lossUntil
+         long whenMsc=HistoryDealGetInteger(t,DEAL_TIME_MSC);
+         bool barred=(order!=legs[i].order && order!=lastOrder && whenMsc-lastEntryMsc<120000) || when<lossUntil
                    || (lockedAt>0 && when>=lockedAt);
          if(barred || (order==legs[i].order && legs[i].prohibited>0)) legs[i].prohibited+=added;
          legs[i].order=order;
          legs[i].net+=fees*added/qty;
-         lastEntry=when; lastOrder=order;
+         lastEntry=when; lastEntryMsc=whenMsc; lastOrder=order;
         }
       legs[i].volume=NormalizeDouble(old+delta,8);
       legs[i].latest=(long)t;
       string checkpoint=GuardKey(IntegerToString((long)t)+"v");
       legs[i].accepted=MathMin(legs[i].accepted,MathAbs(legs[i].volume));
       if(GlobalVariableCheck(checkpoint)) legs[i].accepted=Stored(checkpoint);
+      legs[i].grandfathered=MathMin(MathAbs(legs[i].volume),MathMax(legs[i].grandfathered,Stored(checkpoint+"f")));
       legs[i].prohibited=MathMax(legs[i].prohibited,Stored(GuardKey(IntegerToString((long)t)+"x")));
       legs[i].prohibited=MathMin(legs[i].prohibited,MathAbs(legs[i].volume)-legs[i].accepted);
       if(legs[i].volume==0)
@@ -246,7 +248,7 @@ bool GuardEntry(bool buy,bool market,double volume,double entry,double sl,double
    else if(!GlobalVariableCheck(GuardKey("installed"))) why="Controller initializing";
    else if(dayLock) why="Daily equity lock";
    else if(TimeCurrent()<lossUntil) why="Completed-loss lock";
-   else if(RequestOutstanding() || TimeCurrent()-lastEntry<120 || Stored(GuardKey("reserved"))>TimeCurrent()) why="Entry interval or request pending";
+   else if(RequestOutstanding() || (long)TimeCurrent()*1000-lastEntryMsc<120000 || Stored(GuardKey("reserved"))>TimeCurrent()) why="Entry interval or request pending";
    else if(EarlierPositions(_Symbol,LONG_MAX,0)>=2) why="Symbol position limit";
    long mode=SymbolInfoInteger(_Symbol,SYMBOL_TRADE_MODE);
    if(mode!=SYMBOL_TRADE_MODE_FULL && mode!=(buy?SYMBOL_TRADE_MODE_LONGONLY:SYMBOL_TRADE_MODE_SHORTONLY))
@@ -281,6 +283,7 @@ bool RetrySlot(string key,double intent)
    double attempts=Stored(key+"n");
    if(Stored(key+"i")!=intent) attempts=0;
    if(attempts>=3) return false;
+   if(attempts==2) Print("Final automatic attempt for ",key);
    return Save(key+"i",intent) && Save(key+"n",attempts+1) && Save(key,TimeCurrent()+10);
   }
 bool GuardStop(ulong t,double candidate)
@@ -307,7 +310,12 @@ bool Reduce(ulong t,double amount,string key)
    if(!Allowed() || !PositionSelectByTicket(t)) return false;
    string s=PositionGetString(POSITION_SYMBOL);
    double vol=PositionGetDouble(POSITION_VOLUME),step=SymbolInfoDouble(s,SYMBOL_VOLUME_STEP);
-   if(step<=0 || !corrective.SetTypeFillingBySymbol(s)) return false;
+   if(step<=0) return false;
+   if(!corrective.SetTypeFillingBySymbol(s))
+     {
+      if(SymbolInfoInteger(s,SYMBOL_TRADE_EXEMODE)==SYMBOL_TRADE_EXECUTION_MARKET) return false;
+      corrective.SetTypeFilling(ORDER_FILLING_RETURN);
+     }
    double part=NormalizeDouble(MathFloor((MathMin(amount,vol)+1e-9)/step)*step,8);
    if(SymbolInfoInteger(s,SYMBOL_TRADE_MODE)==SYMBOL_TRADE_MODE_DISABLED || part<=0 || (part<vol && (part<SymbolInfoDouble(s,SYMBOL_VOLUME_MIN) ||
       vol-part+1e-9<SymbolInfoDouble(s,SYMBOL_VOLUME_MIN)))) return false;
@@ -344,14 +352,30 @@ void GuardPosition(ulong t,bool first)
    double target=best==0?bound:(buy?MathMax(bound,best):MathMin(bound,best));
    bool protectedSL=sl>0 && (buy?sl>=target:sl<=target);
    if(protectedSL) { if(!Save(key+"s",sl)) return; }
-   else GuardStop(t,target);
+   else if(GuardStop(t,target))
+     {
+      if(!PositionSelectByTicket(t) || PositionGetDouble(POSITION_VOLUME)!=vol ||
+         PositionGetDouble(POSITION_PRICE_OPEN)!=entry) return;
+      sl=PositionGetDouble(POSITION_SL); tp=PositionGetDouble(POSITION_TP);
+      protectedSL=sl>0 && (buy?sl>=target:sl<=target);
+     }
    string checkpoint=GuardKey(IntegerToString(legs[i].latest));
    double accepted=MathMin(vol,legs[i].accepted);
-   if(first) accepted=vol;
+   if(first)
+     {
+      accepted=vol; legs[i].grandfathered=vol;
+      if(!Save(checkpoint+"vf",vol)) return;
+     }
    double extra=NormalizeDouble(vol-accepted,8);
    double grace=Stored(key+"g");
    bool missing=!protectedSL || tp<=0;
-   if(missing && !grace) { grace=(double)TimeCurrent(); if(!Save(key+"g",grace)) return; }
+   if(missing && !grace)
+     {
+      grace=(double)TimeCurrent();
+      double atRisk=extra>0?extra:MathMax(0,vol-legs[i].grandfathered);
+      if(!Save(key+"floor",vol-atRisk) || !Save(key+"g",grace)) return;
+      Print("Protection grace started for position ",t);
+     }
    if(!missing && grace && !Save(key+"g",0)) return;
    double banned=MathMin(extra,legs[i].prohibited);
    if(extra>0)
@@ -359,10 +383,13 @@ void GuardPosition(ulong t,bool first)
       if(EarlierPositions(s,opened,t)>=2) banned=extra;
       double risk=0;
       if(protectedSL && !Portfolio(risk,legs[i].latest)) banned=extra;
-      if(missing && TimeCurrent()>=grace+MathMin(InpProtectionGraceSeconds,300)) banned=extra;
      }
+   if(missing && TimeCurrent()>=grace+MathMin(InpProtectionGraceSeconds,300))
+      banned=MathMax(banned,MathMax(extra,vol-Stored(key+"floor")));
    if(banned>0)
      {
+      accepted=MathMin(accepted,vol-banned);
+      legs[i].accepted=accepted;
       if(!Save(checkpoint+"x",banned) || !Save(checkpoint+"v",accepted)) return;
       legs[i].prohibited=MathMax(legs[i].prohibited,banned);
       Reduce(t,banned,key);

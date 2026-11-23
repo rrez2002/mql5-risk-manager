@@ -1253,6 +1253,8 @@ void QuickOrder(ENUM_ORDER_TYPE t)
 
 void DeletePendings()
   {
+   GuardAccess access;
+   if(!access.Acquired()) { SetStatus("Account trade operation in progress",C_WARN); return; }
    int n=0;
    trade.SetExpertMagicNumber(InpMagic);
    for(int i=OrdersTotal()-1;i>=0;i--)
@@ -1269,6 +1271,8 @@ void DeletePendings()
 //+------------------------------------------------------------------+
 void CloseAll()
   {
+   GuardAccess access;
+   if(!access.Acquired()) { SetStatus("Account trade operation in progress",C_WARN); return; }
    int n=0;
    trade.SetExpertMagicNumber(InpMagic);
    for(int i=PositionsTotal()-1;i>=0;i--)
@@ -1282,6 +1286,8 @@ void CloseAll()
 
 void CloseByProfit(bool winners)
   {
+   GuardAccess access;
+   if(!access.Acquired()) { SetStatus("Account trade operation in progress",C_WARN); return; }
    int n=0;
    trade.SetExpertMagicNumber(InpMagic);
    for(int i=PositionsTotal()-1;i>=0;i--)
