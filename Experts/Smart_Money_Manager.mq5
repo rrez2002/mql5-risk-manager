@@ -3,7 +3,7 @@
 //|   Risk-based sizing + market/pending orders + protection + panel |
 //+------------------------------------------------------------------+
 #property copyright "Smart Money Manager"
-#property version   "2.32"
+#property version   "2.33"
 #property description "Advanced money management EA with a modern on-chart panel."
 #property description "Market + Limit + Stop orders, drag-and-drop SL/TP chart tool, risk-% lot sizing,"
 #property description "daily loss/profit limits, drawdown guard, loss streak lock, open-risk cap,"
