@@ -18,3 +18,8 @@ assert "OrderCalcProfit(" in guard and "ACCOUNT_BALANCE" not in guard
 assert not re.search(r"(POSITION|DEAL|ORDER)_MAGIC", guard)
 assert re.findall(r"^input .*? (\w+)=", guard, re.M) == ["InpProtectionGraceSeconds"]
 print("Panel routes, stop writer, event handler, account scope and fixed limits passed.")
+reduction = guard.split("bool Reduce(", 1)[1].split("void GuardPosition", 1)[0]
+assert reduction.index("RequestOutstanding(requestKey)") < reduction.index("OrderSend(req,res)")
+assert reduction.index('Save(requestKey+"sending",(double)token)') < reduction.index("OrderSend(req,res)")
+assert "req.volume=part" in reduction and "PositionClose(t" not in reduction
+assert 'if(automatic && !RetrySlot' in reduction

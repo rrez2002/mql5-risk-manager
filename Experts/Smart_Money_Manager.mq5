@@ -1320,7 +1320,7 @@ void PartialCloseAll()
       double vol=PositionGetDouble(POSITION_VOLUME);
       double part=NormalizeLot(vol*InpPartialPct/100.0);
       if(part>=vol || vol-part<mn) continue; // keep at least the minimum lot
-      if(Reduce(t,part,GuardKey(IntegerToString((long)t)+"p"))) n++;
+      if(Reduce(t,part,GuardKey(IntegerToString((long)t)+"p"),PositionGetInteger(POSITION_TIME_UPDATE_MSC),false)) n++;
      }
    SetStatus("Partial close on "+IntegerToString(n)+" position(s)",n>0? C_ACCENT : C_WARN);
   }

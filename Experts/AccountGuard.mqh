@@ -66,6 +66,7 @@ bool Replay(datetime now,datetime day)
    if(!HistorySelect(day,now)) return false;
    int count=HistoryDealsTotal();
    if(!historyDirty && day==historyDay && count==historyCount) return true;
+   historyDirty=true;
    if(!HistorySelect(0,now)) return false;
    ArrayFree(legs);
    lastEntry=0; lastEntryMsc=0; lastOrder=0; lossUntil=0; cashFlow=0; dayActivity=false;
@@ -162,6 +163,7 @@ bool GuardRefresh()
      {
       if(!Save(lock,now)) return false;
       dayLock=now; historyDirty=true;
+      if(!Replay(now,day)) return false;
       Print("Account daily equity loss lock activated.");
      }
    guardReady=true; return true;
@@ -221,11 +223,11 @@ int EarlierPositions(string s,long opened,ulong ticket)
    return n;
   }
 // An acknowledged order can remain at the exchange after the local request returns.
-bool RequestOutstanding()
+bool RequestOutstanding(string prefix)
   {
-   long high=(long)Stored(GuardKey("orderHi")),low=(long)Stored(GuardKey("orderLo"));
+   long high=(long)Stored(prefix+"orderHi"),low=(long)Stored(prefix+"orderLo");
    ulong ticket=((ulong)high<<32)|(ulong)low;
-   long token=(long)Stored(GuardKey("sending"));
+   long token=(long)Stored(prefix+"sending");
    if(ticket==0 && token!=0)
      {
       string tag="SMM#"+IntegerToString(token);
@@ -258,7 +260,7 @@ bool RequestOutstanding()
       if(state!=ORDER_STATE_FILLED && state!=ORDER_STATE_CANCELED && state!=ORDER_STATE_REJECTED && state!=ORDER_STATE_EXPIRED)
          return true;
      }
-   return !Save(GuardKey("sending"),0) || !Save(GuardKey("orderHi"),0) || !Save(GuardKey("orderLo"),0);
+   return !Save(prefix+"sending",0) || !Save(prefix+"orderHi",0) || !Save(prefix+"orderLo",0);
   }
 bool GuardEntry(bool buy,bool market,double volume,double entry,double sl,double tp)
   {
@@ -268,7 +270,7 @@ bool GuardEntry(bool buy,bool market,double volume,double entry,double sl,double
    else if(!GlobalVariableCheck(GuardKey("installed"))) why="Controller initializing";
    else if(dayLock) why="Daily equity lock";
    else if(TimeCurrent()<lossUntil) why="Completed-loss lock";
-   else if(RequestOutstanding() || (long)TimeCurrent()*1000-lastEntryMsc<120000 || Stored(GuardKey("reserved"))>TimeCurrent()) why="Entry interval or request pending";
+   else if(RequestOutstanding(guardPrefix) || (long)TimeCurrent()*1000-lastEntryMsc<120000 || Stored(GuardKey("reserved"))>TimeCurrent()) why="Entry interval or request pending";
    else if(EarlierPositions(_Symbol,LONG_MAX,0)>=2) why="Symbol position limit";
    long mode=SymbolInfoInteger(_Symbol,SYMBOL_TRADE_MODE);
    if(mode!=SYMBOL_TRADE_MODE_FULL && mode!=(buy?SYMBOL_TRADE_MODE_LONGONLY:SYMBOL_TRADE_MODE_SHORTONLY))
@@ -327,24 +329,18 @@ bool GuardStop(ulong t,double candidate)
      { Save(key+"s",target); Save(key+"mn",0); }
    return ok;
   }
-bool Reduce(ulong t,double amount,string key)
+bool Reduce(ulong t,double amount,string key,long observedUpdate,bool automatic)
   {
-   if(!Allowed() || !PositionSelectByTicket(t)) return false;
+   if(!Allowed() || !PositionSelectByTicket(t) || PositionGetInteger(POSITION_TIME_UPDATE_MSC)!=observedUpdate)
+      return false;
    string s=PositionGetString(POSITION_SYMBOL);
    double vol=PositionGetDouble(POSITION_VOLUME),step=SymbolInfoDouble(s,SYMBOL_VOLUME_STEP);
-   if(step<=0) return false;
-   if(!corrective.SetTypeFillingBySymbol(s))
-     {
-      if(SymbolInfoInteger(s,SYMBOL_TRADE_EXEMODE)==SYMBOL_TRADE_EXECUTION_MARKET) return false;
-      corrective.SetTypeFilling(ORDER_FILLING_RETURN);
-     }
-   double part=NormalizeDouble(MathFloor((MathMin(amount,vol)+1e-9)/step)*step,8);
-   if(SymbolInfoInteger(s,SYMBOL_TRADE_MODE)==SYMBOL_TRADE_MODE_DISABLED || part<=0 || (part<vol && (part<SymbolInfoDouble(s,SYMBOL_VOLUME_MIN) ||
-      vol-part+1e-9<SymbolInfoDouble(s,SYMBOL_VOLUME_MIN)))) return false;
-   if(!RetrySlot(key+"c",vol)) return false;
-   if(part==vol) return Done(corrective,corrective.PositionClose(t,InpSlippage));
-   if(AccountInfoInteger(ACCOUNT_MARGIN_MODE)==ACCOUNT_MARGIN_MODE_RETAIL_HEDGING)
-      return Done(corrective,corrective.PositionClosePartial(t,part,InpSlippage));
+   string requestKey=GuardKey(IntegerToString(PositionGetInteger(POSITION_IDENTIFIER))+"r");
+   if(step<=0 || RequestOutstanding(requestKey)) return false;
+   double maximum=SymbolInfoDouble(s,SYMBOL_VOLUME_MAX);
+   double part=NormalizeDouble(MathFloor((MathMin(maximum,MathMin(amount,vol))+1e-9)/step)*step,8);
+   if(SymbolInfoInteger(s,SYMBOL_TRADE_MODE)==SYMBOL_TRADE_MODE_DISABLED || part<=0 || (part<vol &&
+      (part<SymbolInfoDouble(s,SYMBOL_VOLUME_MIN) || vol-part+1e-9<SymbolInfoDouble(s,SYMBOL_VOLUME_MIN)))) return false;
    MqlTradeRequest req={};
    MqlTradeResult res={};
    req.action=TRADE_ACTION_DEAL; req.position=t; req.symbol=s; req.volume=part;
@@ -353,9 +349,27 @@ bool Reduce(ulong t,double amount,string key)
    req.deviation=InpSlippage; req.magic=InpMagic;
    long fill=SymbolInfoInteger(s,SYMBOL_FILLING_MODE);
    req.type_filling=(fill&SYMBOL_FILLING_IOC)!=0?ORDER_FILLING_IOC:((fill&SYMBOL_FILLING_FOK)!=0?ORDER_FILLING_FOK:ORDER_FILLING_RETURN);
+   if(automatic && !RetrySlot(key+"c",vol)) return false;
    MqlTradeCheckResult check={};
    if(!OrderCheck(req,check)) { Print("Reduction check: ",check.comment); return false; }
+   long token=(long)MathMax((double)((long)TimeCurrent()*1000),Stored(GuardKey("sequence"))+1);
+   req.comment="SMM#"+IntegerToString(token);
+   if(!PositionSelectByTicket(t) || PositionGetInteger(POSITION_TIME_UPDATE_MSC)!=observedUpdate ||
+      PositionGetDouble(POSITION_VOLUME)!=vol || !Save(GuardKey("sequence"),(double)token) ||
+      !Save(requestKey+"sending",(double)token)) return false;
    bool sent=OrderSend(req,res);
+   if(res.order>0)
+     {
+      Save(requestKey+"orderHi",(double)(res.order>>32));
+      Save(requestKey+"orderLo",(double)(res.order&0xFFFFFFFF));
+     }
+   if(res.retcode==TRADE_RETCODE_PLACED || res.retcode==TRADE_RETCODE_TIMEOUT ||
+      res.retcode==TRADE_RETCODE_CONNECTION || res.retcode==TRADE_RETCODE_ERROR || res.retcode==0)
+     {
+      Print("Reduction outcome pending for ",t,". Verify broker order ",res.order," before further reduction.");
+      return false;
+     }
+   if(!res.order && res.retcode!=TRADE_RETCODE_DONE_PARTIAL) Save(requestKey+"sending",0);
    if(sent && (res.retcode==TRADE_RETCODE_DONE || res.retcode==TRADE_RETCODE_DONE_PARTIAL)) return true;
    Print("Reduction result: ",res.retcode," ",res.comment); return false;
   }
@@ -368,9 +382,9 @@ void GuardPosition(ulong t,bool first)
    if(i<0 || MathAbs(legs[i].volume-(buy?vol:-vol))>1e-8) { historyDirty=true; guardReady=false; return; }
    string key=LegKey(i),s=PositionGetString(POSITION_SYMBOL);
    double entry=PositionGetDouble(POSITION_PRICE_OPEN),sl=PositionGetDouble(POSITION_SL),tp=PositionGetDouble(POSITION_TP);
-   long opened=PositionGetInteger(POSITION_TIME_MSC);
+   long opened=PositionGetInteger(POSITION_TIME_MSC),updated=PositionGetInteger(POSITION_TIME_UPDATE_MSC);
    double bound=Grid(s,entry*(buy?0.99:1.01),buy),best=Stored(key+"s");
-   if(bound<=0) return;
+   if(bound<=0) { guardReady=false; return; }
    double target=best==0?bound:(buy?MathMax(bound,best):MathMin(bound,best));
    bool protectedSL=sl>0 && (buy?sl>=target:sl<=target);
    if(protectedSL) { if(!Save(key+"s",sl)) return; }
@@ -414,7 +428,7 @@ void GuardPosition(ulong t,bool first)
       legs[i].accepted=accepted;
       if(!Save(checkpoint+"x",banned) || !Save(checkpoint+"v",accepted)) return;
       legs[i].prohibited=MathMax(legs[i].prohibited,banned);
-      Reduce(t,banned,key);
+      Reduce(t,banned,key,updated,true);
      }
    else if(!missing || first)
      {

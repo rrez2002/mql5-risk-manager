@@ -30,3 +30,5 @@ All rows below are **pending demo verification**. Copy both source files to the 
 | 20. Panel regression | Exercise tabs, minimize, chart drag/preview, fixed and risk sizing, six order types, expiry, TP toggle, management actions, session/spread/calendar filters and existing optional locks. An absent TP must prevent submission. |
 
 Demo-specific gaps include deterministic price control for the equality boundary, venue support for partial fills, and broker-specific rejection behavior. Record a scenario as untested if the demo venue cannot produce its prerequisite.
+
+For the rejection and partial-fill cases, delay an acknowledgment of a netting reduction beyond ten seconds. Check the order history for a single reduction request while its outcome is outstanding. Try a manual panel partial close during that interval. After reconciliation, confirm that any remaining reduction is based on the current volume. If the broker provides neither an identifiable order ticket nor the original request comment, that position's panel reductions can remain suspended pending manual inspection.
