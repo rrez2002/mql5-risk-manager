@@ -225,6 +225,26 @@ bool RequestOutstanding()
   {
    long high=(long)Stored(GuardKey("orderHi")),low=(long)Stored(GuardKey("orderLo"));
    ulong ticket=((ulong)high<<32)|(ulong)low;
+   long token=(long)Stored(GuardKey("sending"));
+   if(ticket==0 && token!=0)
+     {
+      string tag="SMM#"+IntegerToString(token);
+      for(int i=OrdersTotal()-1;i>=0 && ticket==0;i--)
+        {
+         ulong t=OrderGetTicket(i);
+         if(t && OrderGetString(ORDER_COMMENT)==tag) ticket=t;
+        }
+      if(ticket==0)
+        {
+         if(!HistorySelect((datetime)(token/1000)-120,TimeTradeServer())) return true;
+         for(int i=HistoryOrdersTotal()-1;i>=0;i--)
+           {
+            ulong t=HistoryOrderGetTicket(i);
+            if(t && HistoryOrderGetString(t,ORDER_COMMENT)==tag) { ticket=t; break; }
+           }
+        }
+      if(ticket==0) return true;
+     }
    if(ticket==0) return false;
    if(OrderSelect(ticket))
      {
@@ -238,7 +258,7 @@ bool RequestOutstanding()
       if(state!=ORDER_STATE_FILLED && state!=ORDER_STATE_CANCELED && state!=ORDER_STATE_REJECTED && state!=ORDER_STATE_EXPIRED)
          return true;
      }
-   return !Save(GuardKey("orderHi"),0) || !Save(GuardKey("orderLo"),0);
+   return !Save(GuardKey("sending"),0) || !Save(GuardKey("orderHi"),0) || !Save(GuardKey("orderLo"),0);
   }
 bool GuardEntry(bool buy,bool market,double volume,double entry,double sl,double tp)
   {
@@ -269,7 +289,9 @@ bool GuardEntry(bool buy,bool market,double volume,double entry,double sl,double
       (buy?(market?q.bid:entry)-sl:sl-(market?q.ask:entry))<gap ||
       (buy?tp-(market?q.bid:entry):(market?q.ask:entry)-tp)<gap)) why="Invalid protective prices";
    if(why!="") { SetStatus(why,C_WARN); return false; }
-   return Save(GuardKey("reserved"),TimeCurrent()+120);
+   long token=(long)MathMax((double)((long)TimeCurrent()*1000),Stored(GuardKey("sequence"))+1);
+   return Save(GuardKey("reserved"),TimeCurrent()+120) && Save(GuardKey("sequence"),(double)token)
+       && Save(GuardKey("sending"),(double)token);
   }
 double GuardGap(string s)
   {

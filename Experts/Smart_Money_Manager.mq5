@@ -1213,15 +1213,16 @@ bool ExecutePlan(ENUM_ORDER_TYPE type,double entry,double sl,double tp)
 
    trade.SetExpertMagicNumber(InpMagic);
    trade.SetDeviationInPoints(InpSlippage);
+   string tag="SMM#"+IntegerToString((long)Stored(GuardKey("sending")));
    bool ok=false;
    switch(type)
      {
-      case ORDER_TYPE_BUY:        ok=trade.Buy(lot,_Symbol,0,sl,tp,"SMM");                      break;
-      case ORDER_TYPE_SELL:       ok=trade.Sell(lot,_Symbol,0,sl,tp,"SMM");                     break;
-      case ORDER_TYPE_BUY_LIMIT:  ok=trade.BuyLimit(lot,entry,_Symbol,sl,tp,tt,exp,"SMM");      break;
-      case ORDER_TYPE_BUY_STOP:   ok=trade.BuyStop(lot,entry,_Symbol,sl,tp,tt,exp,"SMM");       break;
-      case ORDER_TYPE_SELL_LIMIT: ok=trade.SellLimit(lot,entry,_Symbol,sl,tp,tt,exp,"SMM");     break;
-      case ORDER_TYPE_SELL_STOP:  ok=trade.SellStop(lot,entry,_Symbol,sl,tp,tt,exp,"SMM");      break;
+      case ORDER_TYPE_BUY:        ok=trade.Buy(lot,_Symbol,0,sl,tp,tag);                      break;
+      case ORDER_TYPE_SELL:       ok=trade.Sell(lot,_Symbol,0,sl,tp,tag);                     break;
+      case ORDER_TYPE_BUY_LIMIT:  ok=trade.BuyLimit(lot,entry,_Symbol,sl,tp,tt,exp,tag);      break;
+      case ORDER_TYPE_BUY_STOP:   ok=trade.BuyStop(lot,entry,_Symbol,sl,tp,tt,exp,tag);       break;
+      case ORDER_TYPE_SELL_LIMIT: ok=trade.SellLimit(lot,entry,_Symbol,sl,tp,tt,exp,tag);     break;
+      case ORDER_TYPE_SELL_STOP:  ok=trade.SellStop(lot,entry,_Symbol,sl,tp,tt,exp,tag);      break;
       default: break;
      }
 
@@ -1231,6 +1232,10 @@ bool ExecutePlan(ENUM_ORDER_TYPE type,double entry,double sl,double tp)
       Save(GuardKey("orderHi"),(double)(submitted>>32));
       Save(GuardKey("orderLo"),(double)(submitted&0xFFFFFFFF));
      }
+   uint rc=trade.ResultRetcode();
+   if(!submitted && rc!=0 && rc!=TRADE_RETCODE_TIMEOUT && rc!=TRADE_RETCODE_CONNECTION &&
+      rc!=TRADE_RETCODE_ERROR && rc!=TRADE_RETCODE_PLACED && rc!=TRADE_RETCODE_DONE && rc!=TRADE_RETCODE_DONE_PARTIAL)
+      Save(GuardKey("sending"),0);
    if(ok && !mkt && submitted>0 && OrderSelect(submitted)) Save(GuardKey("reserved"),0);
    if(ok && (trade.ResultRetcode()==TRADE_RETCODE_DONE || trade.ResultRetcode()==TRADE_RETCODE_DONE_PARTIAL || trade.ResultRetcode()==TRADE_RETCODE_PLACED))
      {
