@@ -3,7 +3,7 @@
 //|   Risk-based sizing + market/pending orders + protection + panel |
 //+------------------------------------------------------------------+
 #property copyright "Smart Money Manager"
-#property version   "2.32"
+#property version   "2.33"
 #property description "Advanced money management EA with a modern on-chart panel."
 #property description "Market + Limit + Stop orders, drag-and-drop SL/TP chart tool, risk-% lot sizing,"
 #property description "daily loss/profit limits, drawdown guard, loss streak lock, open-risk cap,"
@@ -1151,8 +1151,12 @@ void DefaultLevels(ENUM_ORDER_TYPE t,double &entry,double &sl,double &tp)
   }
 
 //--- validate everything and send the order. tp = 0 means no take profit.
+#include "AccountGuard.mqh"
+
 bool ExecutePlan(ENUM_ORDER_TYPE type,double entry,double sl,double tp)
   {
+   GuardAccess access;
+   if(!access.Acquired()) { SetStatus("Account trade operation in progress",C_WARN); return false; }
    UpdateStats(true);
    if(!CanTrade()) return false;
 
@@ -1202,26 +1206,38 @@ bool ExecutePlan(ENUM_ORDER_TYPE type,double entry,double sl,double tp)
       if(OpenRiskMoney()+lot*LossPerLot(slPts)>cap)
         { SetStatus("Open risk limit would be exceeded",C_WARN); return false; }
      }
-   if(!MarginOK(type,lot,entry)) return false;
+   if(!MarginOK(type,lot,entry) || !GuardEntry(buy,mkt,lot,entry,sl,tp)) return false;
 
    ENUM_ORDER_TYPE_TIME tt=(gExpiry>0)? ORDER_TIME_SPECIFIED : ORDER_TIME_GTC;
    datetime exp=(gExpiry>0)? TimeCurrent()+gExpiry*60 : 0;
 
    trade.SetExpertMagicNumber(InpMagic);
    trade.SetDeviationInPoints(InpSlippage);
+   string tag="SMM#"+IntegerToString((long)Stored(GuardKey("sending")));
    bool ok=false;
    switch(type)
      {
-      case ORDER_TYPE_BUY:        ok=trade.Buy(lot,_Symbol,0,sl,tp,"SMM");                      break;
-      case ORDER_TYPE_SELL:       ok=trade.Sell(lot,_Symbol,0,sl,tp,"SMM");                     break;
-      case ORDER_TYPE_BUY_LIMIT:  ok=trade.BuyLimit(lot,entry,_Symbol,sl,tp,tt,exp,"SMM");      break;
-      case ORDER_TYPE_BUY_STOP:   ok=trade.BuyStop(lot,entry,_Symbol,sl,tp,tt,exp,"SMM");       break;
-      case ORDER_TYPE_SELL_LIMIT: ok=trade.SellLimit(lot,entry,_Symbol,sl,tp,tt,exp,"SMM");     break;
-      case ORDER_TYPE_SELL_STOP:  ok=trade.SellStop(lot,entry,_Symbol,sl,tp,tt,exp,"SMM");      break;
+      case ORDER_TYPE_BUY:        ok=trade.Buy(lot,_Symbol,0,sl,tp,tag);                      break;
+      case ORDER_TYPE_SELL:       ok=trade.Sell(lot,_Symbol,0,sl,tp,tag);                     break;
+      case ORDER_TYPE_BUY_LIMIT:  ok=trade.BuyLimit(lot,entry,_Symbol,sl,tp,tt,exp,tag);      break;
+      case ORDER_TYPE_BUY_STOP:   ok=trade.BuyStop(lot,entry,_Symbol,sl,tp,tt,exp,tag);       break;
+      case ORDER_TYPE_SELL_LIMIT: ok=trade.SellLimit(lot,entry,_Symbol,sl,tp,tt,exp,tag);     break;
+      case ORDER_TYPE_SELL_STOP:  ok=trade.SellStop(lot,entry,_Symbol,sl,tp,tt,exp,tag);      break;
       default: break;
      }
 
-   if(ok && (trade.ResultRetcode()==TRADE_RETCODE_DONE || trade.ResultRetcode()==TRADE_RETCODE_PLACED))
+   ulong submitted=trade.ResultOrder();
+   if(submitted>0)
+     {
+      Save(GuardKey("orderHi"),(double)(submitted>>32));
+      Save(GuardKey("orderLo"),(double)(submitted&0xFFFFFFFF));
+     }
+   uint rc=trade.ResultRetcode();
+   if(!submitted && rc!=0 && rc!=TRADE_RETCODE_TIMEOUT && rc!=TRADE_RETCODE_CONNECTION &&
+      rc!=TRADE_RETCODE_ERROR && rc!=TRADE_RETCODE_PLACED && rc!=TRADE_RETCODE_DONE && rc!=TRADE_RETCODE_DONE_PARTIAL)
+      Save(GuardKey("sending"),0);
+   if(ok && !mkt && submitted>0 && OrderSelect(submitted)) Save(GuardKey("reserved"),0);
+   if(ok && (trade.ResultRetcode()==TRADE_RETCODE_DONE || trade.ResultRetcode()==TRADE_RETCODE_DONE_PARTIAL || trade.ResultRetcode()==TRADE_RETCODE_PLACED))
      {
       SetStatus(OrderName(type)+" "+DoubleToString(lot,2)+" lots @ "+DoubleToString(mkt? trade.ResultPrice() : entry,dg),C_ACCENT);
       UpdateStats(true);
@@ -1242,13 +1258,15 @@ void QuickOrder(ENUM_ORDER_TYPE t)
 
 void DeletePendings()
   {
+   GuardAccess access;
+   if(!access.Acquired()) { SetStatus("Account trade operation in progress",C_WARN); return; }
    int n=0;
    trade.SetExpertMagicNumber(InpMagic);
    for(int i=OrdersTotal()-1;i>=0;i--)
      {
       ulong t=OrderGetTicket(i);
       if(t>0 && MyOrder(t))
-         if(trade.OrderDelete(t)) n++;
+         if(Allowed() && Done(trade,trade.OrderDelete(t))) n++;
      }
    SetStatus("Deleted "+IntegerToString(n)+" pending order(s)",C_ACCENT);
   }
@@ -1258,19 +1276,23 @@ void DeletePendings()
 //+------------------------------------------------------------------+
 void CloseAll()
   {
+   GuardAccess access;
+   if(!access.Acquired()) { SetStatus("Account trade operation in progress",C_WARN); return; }
    int n=0;
    trade.SetExpertMagicNumber(InpMagic);
    for(int i=PositionsTotal()-1;i>=0;i--)
      {
       ulong t=PositionGetTicket(i);
       if(t>0 && MyPos(t))
-         if(trade.PositionClose(t,InpSlippage)) n++;
+         if(Allowed() && Done(trade,trade.PositionClose(t,InpSlippage))) n++;
      }
    SetStatus("Closed "+IntegerToString(n)+" position(s)",C_ACCENT);
   }
 
 void CloseByProfit(bool winners)
   {
+   GuardAccess access;
+   if(!access.Acquired()) { SetStatus("Account trade operation in progress",C_WARN); return; }
    int n=0;
    trade.SetExpertMagicNumber(InpMagic);
    for(int i=PositionsTotal()-1;i>=0;i--)
@@ -1279,13 +1301,15 @@ void CloseByProfit(bool winners)
       if(t==0 || !MyPos(t)) continue;
       double p=PositionGetDouble(POSITION_PROFIT)+PositionGetDouble(POSITION_SWAP);
       if((winners && p>0) || (!winners && p<0))
-         if(trade.PositionClose(t,InpSlippage)) n++;
+         if(Allowed() && Done(trade,trade.PositionClose(t,InpSlippage))) n++;
      }
    SetStatus("Closed "+IntegerToString(n)+(winners? " winner(s)" : " loser(s)"),C_ACCENT);
   }
 
 void PartialCloseAll()
   {
+   GuardAccess access;
+   if(!access.Acquired()) return;
    int n=0;
    double mn=SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_MIN);
    trade.SetExpertMagicNumber(InpMagic);
@@ -1296,13 +1320,15 @@ void PartialCloseAll()
       double vol=PositionGetDouble(POSITION_VOLUME);
       double part=NormalizeLot(vol*InpPartialPct/100.0);
       if(part>=vol || vol-part<mn) continue; // keep at least the minimum lot
-      if(trade.PositionClosePartial(t,part,InpSlippage)) n++;
+      if(Reduce(t,part,GuardKey(IntegerToString((long)t)+"p"),PositionGetInteger(POSITION_TIME_UPDATE_MSC),false)) n++;
      }
    SetStatus("Partial close on "+IntegerToString(n)+" position(s)",n>0? C_ACCENT : C_WARN);
   }
 
 void BreakEvenAll()
   {
+   GuardAccess access;
+   if(!access.Acquired() || !GuardRefresh()) return;
    int n=0;
    int dg=(int)SymbolInfoInteger(_Symbol,SYMBOL_DIGITS);
    for(int i=PositionsTotal()-1;i>=0;i--)
@@ -1312,18 +1338,17 @@ void BreakEvenAll()
       long type=PositionGetInteger(POSITION_TYPE);
       double op=PositionGetDouble(POSITION_PRICE_OPEN);
       double sl=PositionGetDouble(POSITION_SL);
-      double tp=PositionGetDouble(POSITION_TP);
       double bid=SymbolInfoDouble(_Symbol,SYMBOL_BID);
       double ask=SymbolInfoDouble(_Symbol,SYMBOL_ASK);
       if(type==POSITION_TYPE_BUY)
         {
          double nsl=NormalizeDouble(op+InpBEOffset*_Point,dg);
-         if(bid>nsl && (sl==0 || nsl>sl)) { if(trade.PositionModify(t,nsl,tp)) n++; }
+         if(bid>nsl && (sl==0 || nsl>sl)) { if(GuardStop(t,nsl)) n++; }
         }
       else
         {
          double nsl=NormalizeDouble(op-InpBEOffset*_Point,dg);
-         if(ask<nsl && (sl==0 || nsl<sl)) { if(trade.PositionModify(t,nsl,tp)) n++; }
+         if(ask<nsl && (sl==0 || nsl<sl)) { if(GuardStop(t,nsl)) n++; }
         }
      }
    SetStatus("Break-even set on "+IntegerToString(n)+" position(s)",C_ACCENT);
@@ -1334,6 +1359,8 @@ void BreakEvenAll()
 //+------------------------------------------------------------------+
 void ManagePositions()
   {
+   GuardAccess access;
+   if(!access.Acquired() || !GuardRefresh()) return;
    if(!InpUseBE && !InpUseTrail) return;
    int dg=(int)SymbolInfoInteger(_Symbol,SYMBOL_DIGITS);
    double bid=SymbolInfoDouble(_Symbol,SYMBOL_BID);
@@ -1347,7 +1374,6 @@ void ManagePositions()
       long type=PositionGetInteger(POSITION_TYPE);
       double op=PositionGetDouble(POSITION_PRICE_OPEN);
       double sl=PositionGetDouble(POSITION_SL);
-      double tp=PositionGetDouble(POSITION_TP);
 
       if(type==POSITION_TYPE_BUY)
         {
@@ -1365,7 +1391,7 @@ void ManagePositions()
            }
          target=NormalizeDouble(target,dg);
          if(target>sl+_Point*0.5 && (bid-target)/_Point>stopsLvl)
-            trade.PositionModify(t,target,tp);
+            GuardStop(t,target);
         }
       else if(type==POSITION_TYPE_SELL)
         {
@@ -1384,7 +1410,7 @@ void ManagePositions()
          target=NormalizeDouble(target,dg);
          if(sl==0 || target<sl-_Point*0.5)
             if((target-ask)/_Point>stopsLvl && target>0)
-               trade.PositionModify(t,target,tp);
+               GuardStop(t,target);
         }
      }
   }
@@ -1717,12 +1743,14 @@ void UpdatePanel()
    SetTxt("v_chk",chk,gate? C_WARN : C_MUTED);
 
    // status line
-   if(gLocked) SetStatus("LOCKED: "+gLockReason,C_SELL);
+   if(dayLock && historyDay==TimeCurrent()-TimeCurrent()%86400) SetStatus("LOCKED: Account daily equity guard",C_SELL);
+   else if(TimeCurrent()<lossUntil) SetStatus("LOCKED: Completed-loss cooldown",C_SELL);
+   else if(gLocked) SetStatus("LOCKED: "+gLockReason,C_SELL);
    else if(gWarn!="") SetStatus("ALERT: "+gWarn,C_WARN);
    else if(StringFind(gStatus,"LOCKED")==0 || StringFind(gStatus,"ALERT:")==0) SetStatus("Ready",C_ACCENT);
 
    // order buttons look disabled while locked / gated
-   bool off=(gLocked || gate);
+   bool off=(dayLock!=0 || TimeCurrent()<lossUntil || gLocked || gate);
    color dis=C_BAR_BG;
    ObjectSetInteger(0,PFX+"btn_buy",OBJPROP_BGCOLOR,off? dis : C_BUY);
    ObjectSetInteger(0,PFX+"btn_sell",OBJPROP_BGCOLOR,off? dis : C_SELL);
@@ -1740,6 +1768,7 @@ void UpdatePanel()
 //+------------------------------------------------------------------+
 int OnInit()
   {
+   GuardInit();
    gRisk=InpRiskPercent;
    gSL=InpSLPoints;
    gRR=InpRR;
@@ -1770,6 +1799,7 @@ int OnInit()
 
 void OnDeinit(const int reason)
   {
+   if(owner!=INVALID_HANDLE) FileClose(owner);
    EventKillTimer();
    ObjectsDeleteAll(0,PFX);
    ChartRedraw();
@@ -1777,14 +1807,15 @@ void OnDeinit(const int reason)
 
 void OnTick()
   {
-   ManagePositions();
-   UpdatePanel();
+   // Reconciliation and automatic management run on the timer.
   }
 
 void OnTimer()
   {
    static int cnt=0;
    cnt++;
+   if(cnt%4==0 || (owner!=INVALID_HANDLE && historyDirty)) GuardCycle();
+   if(cnt%4==0) ManagePositions();
    if(cnt%240==0) RefreshNews();   // every 60 s
    int headlineTicks=MathMax(1,MathMin(60,InpHeadlineRefreshMinutes))*240;
    if(cnt%headlineTicks==0) RefreshHeadlines();
@@ -1796,11 +1827,7 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
                         const MqlTradeRequest &request,
                         const MqlTradeResult &result)
   {
-   if(trans.type==TRADE_TRANSACTION_DEAL_ADD)
-     {
-      UpdateStats(true);
-      UpdatePanel();
-     }
+   historyDirty=true;
   }
 
 void OnChartEvent(const int id,const long &lparam,const double &dparam,const string &sparam)
