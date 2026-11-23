@@ -1151,6 +1151,8 @@ void DefaultLevels(ENUM_ORDER_TYPE t,double &entry,double &sl,double &tp)
   }
 
 //--- validate everything and send the order. tp = 0 means no take profit.
+#include "AccountGuard.mqh"
+
 bool ExecutePlan(ENUM_ORDER_TYPE type,double entry,double sl,double tp)
   {
    UpdateStats(true);
@@ -1202,7 +1204,7 @@ bool ExecutePlan(ENUM_ORDER_TYPE type,double entry,double sl,double tp)
       if(OpenRiskMoney()+lot*LossPerLot(slPts)>cap)
         { SetStatus("Open risk limit would be exceeded",C_WARN); return false; }
      }
-   if(!MarginOK(type,lot,entry)) return false;
+   if(!MarginOK(type,lot,entry) || !GuardEntry(buy,mkt,lot,entry,sl,tp)) return false;
 
    ENUM_ORDER_TYPE_TIME tt=(gExpiry>0)? ORDER_TIME_SPECIFIED : ORDER_TIME_GTC;
    datetime exp=(gExpiry>0)? TimeCurrent()+gExpiry*60 : 0;
@@ -1221,7 +1223,7 @@ bool ExecutePlan(ENUM_ORDER_TYPE type,double entry,double sl,double tp)
       default: break;
      }
 
-   if(ok && (trade.ResultRetcode()==TRADE_RETCODE_DONE || trade.ResultRetcode()==TRADE_RETCODE_PLACED))
+   if(ok && (trade.ResultRetcode()==TRADE_RETCODE_DONE || trade.ResultRetcode()==TRADE_RETCODE_DONE_PARTIAL || trade.ResultRetcode()==TRADE_RETCODE_PLACED))
      {
       SetStatus(OrderName(type)+" "+DoubleToString(lot,2)+" lots @ "+DoubleToString(mkt? trade.ResultPrice() : entry,dg),C_ACCENT);
       UpdateStats(true);
@@ -1248,7 +1250,7 @@ void DeletePendings()
      {
       ulong t=OrderGetTicket(i);
       if(t>0 && MyOrder(t))
-         if(trade.OrderDelete(t)) n++;
+         if(Allowed() && Done(trade,trade.OrderDelete(t))) n++;
      }
    SetStatus("Deleted "+IntegerToString(n)+" pending order(s)",C_ACCENT);
   }
@@ -1264,7 +1266,7 @@ void CloseAll()
      {
       ulong t=PositionGetTicket(i);
       if(t>0 && MyPos(t))
-         if(trade.PositionClose(t,InpSlippage)) n++;
+         if(Allowed() && Done(trade,trade.PositionClose(t,InpSlippage))) n++;
      }
    SetStatus("Closed "+IntegerToString(n)+" position(s)",C_ACCENT);
   }
@@ -1279,7 +1281,7 @@ void CloseByProfit(bool winners)
       if(t==0 || !MyPos(t)) continue;
       double p=PositionGetDouble(POSITION_PROFIT)+PositionGetDouble(POSITION_SWAP);
       if((winners && p>0) || (!winners && p<0))
-         if(trade.PositionClose(t,InpSlippage)) n++;
+         if(Allowed() && Done(trade,trade.PositionClose(t,InpSlippage))) n++;
      }
    SetStatus("Closed "+IntegerToString(n)+(winners? " winner(s)" : " loser(s)"),C_ACCENT);
   }
@@ -1296,7 +1298,7 @@ void PartialCloseAll()
       double vol=PositionGetDouble(POSITION_VOLUME);
       double part=NormalizeLot(vol*InpPartialPct/100.0);
       if(part>=vol || vol-part<mn) continue; // keep at least the minimum lot
-      if(trade.PositionClosePartial(t,part,InpSlippage)) n++;
+      if(Allowed() && Done(trade,trade.PositionClosePartial(t,part,InpSlippage))) n++;
      }
    SetStatus("Partial close on "+IntegerToString(n)+" position(s)",n>0? C_ACCENT : C_WARN);
   }
@@ -1318,12 +1320,12 @@ void BreakEvenAll()
       if(type==POSITION_TYPE_BUY)
         {
          double nsl=NormalizeDouble(op+InpBEOffset*_Point,dg);
-         if(bid>nsl && (sl==0 || nsl>sl)) { if(trade.PositionModify(t,nsl,tp)) n++; }
+         if(bid>nsl && (sl==0 || nsl>sl)) { if(GuardStop(t,nsl)) n++; }
         }
       else
         {
          double nsl=NormalizeDouble(op-InpBEOffset*_Point,dg);
-         if(ask<nsl && (sl==0 || nsl<sl)) { if(trade.PositionModify(t,nsl,tp)) n++; }
+         if(ask<nsl && (sl==0 || nsl<sl)) { if(GuardStop(t,nsl)) n++; }
         }
      }
    SetStatus("Break-even set on "+IntegerToString(n)+" position(s)",C_ACCENT);
@@ -1365,7 +1367,7 @@ void ManagePositions()
            }
          target=NormalizeDouble(target,dg);
          if(target>sl+_Point*0.5 && (bid-target)/_Point>stopsLvl)
-            trade.PositionModify(t,target,tp);
+            GuardStop(t,target);
         }
       else if(type==POSITION_TYPE_SELL)
         {
@@ -1384,7 +1386,7 @@ void ManagePositions()
          target=NormalizeDouble(target,dg);
          if(sl==0 || target<sl-_Point*0.5)
             if((target-ask)/_Point>stopsLvl && target>0)
-               trade.PositionModify(t,target,tp);
+               GuardStop(t,target);
         }
      }
   }
@@ -1740,6 +1742,7 @@ void UpdatePanel()
 //+------------------------------------------------------------------+
 int OnInit()
   {
+   GuardInit();
    gRisk=InpRiskPercent;
    gSL=InpSLPoints;
    gRR=InpRR;
@@ -1770,6 +1773,7 @@ int OnInit()
 
 void OnDeinit(const int reason)
   {
+   if(owner!=INVALID_HANDLE) FileClose(owner);
    EventKillTimer();
    ObjectsDeleteAll(0,PFX);
    ChartRedraw();
@@ -1777,14 +1781,14 @@ void OnDeinit(const int reason)
 
 void OnTick()
   {
-   ManagePositions();
-   UpdatePanel();
+   // Reconciliation and automatic management run on the timer.
   }
 
 void OnTimer()
   {
    static int cnt=0;
    cnt++;
+   if(historyDirty || cnt%4==0) { GuardCycle(); if(owner!=INVALID_HANDLE) ManagePositions(); }
    if(cnt%240==0) RefreshNews();   // every 60 s
    int headlineTicks=MathMax(1,MathMin(60,InpHeadlineRefreshMinutes))*240;
    if(cnt%headlineTicks==0) RefreshHeadlines();
@@ -1796,11 +1800,7 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
                         const MqlTradeRequest &request,
                         const MqlTradeResult &result)
   {
-   if(trans.type==TRADE_TRANSACTION_DEAL_ADD)
-     {
-      UpdateStats(true);
-      UpdatePanel();
-     }
+   historyDirty=true;
   }
 
 void OnChartEvent(const int id,const long &lparam,const double &dparam,const string &sparam)
