@@ -3,7 +3,7 @@
 //|   Risk-based sizing + market/pending orders + protection + panel |
 //+------------------------------------------------------------------+
 #property copyright "Smart Money Manager"
-#property version   "2.33"
+#property version   "2.34"
 #property description "Advanced money management EA with a modern on-chart panel."
 #property description "Market + Limit + Stop orders, drag-and-drop SL/TP chart tool, risk-% lot sizing,"
 #property description "daily loss/profit limits, drawdown guard, loss streak lock, open-risk cap,"
@@ -205,6 +205,12 @@ void Rect(string name,int x,int y,int w,int h,color bg,color border)
    ObjectSetInteger(0,n,OBJPROP_BACK,false);
   }
 
+int PanelFontSize(int points)
+  {
+   long dpi=TerminalInfoInteger(TERMINAL_SCREEN_DPI);
+   return dpi>96?(int)MathMax(1,MathRound(points*96.0/dpi)):points;
+  }
+
 void Lbl(string name,int x,int y,string txt,color clr,int size=9,string font="Segoe UI",
          ENUM_ANCHOR_POINT anchor=ANCHOR_LEFT_UPPER)
   {
@@ -216,7 +222,7 @@ void Lbl(string name,int x,int y,string txt,color clr,int size=9,string font="Se
    ObjectSetInteger(0,n,OBJPROP_YDISTANCE,y);
    ObjectSetString(0,n,OBJPROP_TEXT,txt);
    ObjectSetString(0,n,OBJPROP_FONT,font);
-   ObjectSetInteger(0,n,OBJPROP_FONTSIZE,size);
+   ObjectSetInteger(0,n,OBJPROP_FONTSIZE,PanelFontSize(size));
    ObjectSetInteger(0,n,OBJPROP_COLOR,clr);
    ObjectSetInteger(0,n,OBJPROP_SELECTABLE,false);
    ObjectSetInteger(0,n,OBJPROP_HIDDEN,true);
@@ -240,7 +246,7 @@ void Btn(string name,int x,int y,int w,int h,string txt,color bg,color fg=C_TEXT
    ObjectSetInteger(0,n,OBJPROP_YSIZE,h);
    ObjectSetString(0,n,OBJPROP_TEXT,txt);
    ObjectSetString(0,n,OBJPROP_FONT,"Segoe UI Semibold");
-   ObjectSetInteger(0,n,OBJPROP_FONTSIZE,size);
+   ObjectSetInteger(0,n,OBJPROP_FONTSIZE,PanelFontSize(size));
    ObjectSetInteger(0,n,OBJPROP_COLOR,fg);
    ObjectSetInteger(0,n,OBJPROP_BGCOLOR,bg);
    ObjectSetInteger(0,n,OBJPROP_BORDER_COLOR,bg);
@@ -260,7 +266,7 @@ void Edt(string name,int x,int y,int w,int h,string txt)
    ObjectSetInteger(0,n,OBJPROP_YSIZE,h);
    ObjectSetString(0,n,OBJPROP_TEXT,txt);
    ObjectSetString(0,n,OBJPROP_FONT,"Segoe UI Semibold");
-   ObjectSetInteger(0,n,OBJPROP_FONTSIZE,10);
+   ObjectSetInteger(0,n,OBJPROP_FONTSIZE,PanelFontSize(10));
    ObjectSetInteger(0,n,OBJPROP_ALIGN,ALIGN_CENTER);
    ObjectSetInteger(0,n,OBJPROP_COLOR,C_ACCENT);
    ObjectSetInteger(0,n,OBJPROP_BGCOLOR,C_BAR_BG);
@@ -318,7 +324,7 @@ void BuildPanel()
    Rect("hdr",x,y,PW,46,C_HEADER,C_HEADER);
    Rect("hdr_line",x,y+46,PW,2,C_ACCENT,C_ACCENT);
    Lbl("title",x+pad,y+7,"SMART MONEY MANAGER",C_TEXT,11,"Segoe UI Semibold");
-   Lbl("sub",x+pad,y+26,_Symbol+"  |  Risk Engine v2.32",C_MUTED,8);
+   Lbl("sub",x+pad,y+26,_Symbol+"  |  Risk Engine v2.34",C_MUTED,8);
    Btn("btn_min",x+PW-38,y+10,26,26,"–",C_BTN,C_TEXT,11);
    Lbl("dot",x+PW-48,y+13,"●",C_ACCENT,14,"Segoe UI",ANCHOR_RIGHT_UPPER);
 
@@ -1153,6 +1159,13 @@ void DefaultLevels(ENUM_ORDER_TYPE t,double &entry,double &sl,double &tp)
 //--- validate everything and send the order. tp = 0 means no take profit.
 #include "AccountGuard.mqh"
 
+string PlanRiskError(double entry,double sl,double tp)
+  {
+   if(sl<=0 || tp<=0) return "Set both SL and TP";
+   if(MathAbs(entry-sl)>entry*0.01+1e-10) return "SL exceeds 1% of entry price";
+   return "";
+  }
+
 bool ExecutePlan(ENUM_ORDER_TYPE type,double entry,double sl,double tp)
   {
    GuardAccess access;
@@ -1176,6 +1189,9 @@ bool ExecutePlan(ENUM_ORDER_TYPE type,double entry,double sl,double tp)
    entry=NormalizeDouble(entry,dg);
    sl=NormalizeDouble(sl,dg);
    if(tp>0) tp=NormalizeDouble(tp,dg);
+
+   string riskError=PlanRiskError(entry,sl,tp);
+   if(riskError!="") { SetStatus(riskError,C_WARN); return false; }
 
    if(buy)
      {
@@ -1557,6 +1573,8 @@ void UpdateTool()
       if(sl<=entry) bad="SL must be above entry";
       else if(tp>0 && tp>=entry) bad="TP must be below entry";
      }
+   if(bad=="") bad=PlanRiskError(entry,sl,tp);
+   if(bad=="" && lot<=0) bad="No valid lot for this SL and risk";
    if(bad=="" && !mkt) bad=PendingError(gPlanType,entry);
 
    //--- zones (TradingView-style risk / reward boxes)
@@ -1565,7 +1583,8 @@ void UpdateTool()
    else { ObjectDelete(0,TL+"z_tp"); ObjectDelete(0,TL+"t_tp"); }
 
    //--- labels
-   TText("t_e",entry,OrderName(gPlanType)+"   "+DoubleToString(lot,2)+" lot"+
+   if(bad!="") TText("t_e",entry,bad,C_WARN);
+   else TText("t_e",entry,OrderName(gPlanType)+"   "+DoubleToString(lot,2)+" lot"+
          (rr>0? "   |   R:R "+DoubleToString(rr,2) : ""),C_ENTRY);
    TText("t_sl",sl,"SL  "+DoubleToString(slPts,0)+" pts   "+Money(-risk),C_SELL);
    if(tp>0) TText("t_tp",tp,"TP  "+DoubleToString(tpPts,0)+" pts   +"+Money(rew),C_ACCENT);
@@ -1719,11 +1738,18 @@ void UpdatePanel()
    SetTxt("dd_v",DoubleToString(ddPct,2)+"% / "+DoubleToString(InpMaxDrawdownPct,1)+"%",dc);
 
    // computed values
-   double lot=CalcLot();
-   double riskMoney=lot*LossPerLot(gSL);
+   double slPts=gSL,tpPts=gSL*gRR;
+   if(gArmed)
+     {
+      double e,sl,tp;
+      PlanLevels(e,sl,tp);
+      slPts=MathAbs(e-sl)/_Point;
+      tpPts=tp>0?MathAbs(tp-e)/_Point:0;
+     }
+   double lot=CalcLotPts(slPts);
    SetTxt("v_lot",DoubleToString(lot,2)+" lot",C_ACCENT);
-   SetTxt("v_rk",Money(riskMoney),C_SELL);
-   SetTxt("v_rw",gRR>0? Money(riskMoney*gRR) : "-",C_BUY);
+   SetTxt("v_rk",Money(lot*LossPerLot(slPts)),C_SELL);
+   SetTxt("v_rw",tpPts>0? Money(lot*ProfitPerLot(tpPts)) : "-",C_BUY);
    SetTxt("v_open",
           "Open "+IntegerToString(CountPositions())+"   Pending "+IntegerToString(CountPendings())+
           "   Max "+IntegerToString(InpMaxPositions)+
