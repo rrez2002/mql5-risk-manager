@@ -3,7 +3,7 @@
 //|   Risk-based sizing + market/pending orders + protection + panel |
 //+------------------------------------------------------------------+
 #property copyright "Smart Money Manager"
-#property version   "2.35"
+#property version   "2.36"
 #property description "Advanced money management EA with a modern on-chart panel."
 #property description "Market + Limit + Stop orders, drag-and-drop SL/TP chart tool, risk-% lot sizing,"
 #property description "daily loss/profit limits, drawdown guard, loss streak lock, open-risk cap,"
@@ -329,15 +329,15 @@ void BuildPanel()
    Rect("bg",x,y,PW,200,C_BG,C_BORDER);
    Rect("hdr",x,y,PW,52,C_HEADER,C_HEADER);
    Rect("hdr_line",x,y+52,PW,2,C_ACCENT,C_ACCENT);
-   Lbl("title",x+pad,y+7,"SMART MONEY MANAGER",C_TEXT,11,"Segoe UI Semibold");
-   Lbl("sub",x+pad,y+29,_Symbol+"  |  Risk Engine v2.35",C_MUTED,8);
+   Lbl("title",x+pad,y+7,"Smart Money Manager",C_TEXT,11,"Segoe UI Semibold");
+   Lbl("sub",x+pad,y+29,_Symbol+"  |  Risk Engine v2.36",C_MUTED,8);
    Btn("btn_min",x+PW-38,y+10,26,26,"–",C_BTN,C_TEXT,11);
    Lbl("dot",x+PW-48,y+13,"●",C_ACCENT,14,"Segoe UI",ANCHOR_RIGHT_UPPER);
 
    // ---------------- tab bar ----------------
    gCurTab=-2;
    int tw=(inner-12)/5;
-   string tn[5]={"ACCOUNT","SETUP","TRADE","MANAGE","NEWS"};
+   string tn[5]={"Account","Setup","Trade","Manage","News"};
    for(int k=0;k<5;k++)
       Btn("tab_"+IntegerToString(k),x+pad+k*(tw+3),y+62,tw,30,tn[k],C_BTN,C_TEXT,8);
 
@@ -416,10 +416,20 @@ void BuildPanel()
    // ================= TAB 2 : TRADE =================
    gCurTab=2;
    cy=top;
-   Rect("c4",x+pad-4,cy-4,inner+8,50,C_CARD,C_BORDER);
-   Lbl("v_plan1",x+pad+4,cy+2,"No active order plan",C_MUTED,10,"Segoe UI Semibold");
-   Lbl("v_plan2",x+pad+4,cy+26,"Choose an order type below, then drag SL / TP",C_MUTED,8);
-   cy+=62;
+   Rect("c4",x,cy-4,inner+2*pad,146,C_CARD,C_BORDER);
+   Lbl("v_plan1",x+pad,cy+4,"No active order plan",C_MUTED,10,"Segoe UI Semibold");
+   Lbl("v_plan2",x+pad,cy+29,"Choose an order type, then drag the lines",C_MUTED,8);
+   string levelName[3]={"Entry","Stop loss","Take profit"};
+   color levelColor[3]={C_ENTRY,C_SELL,C_BUY};
+   for(int row=0;row<3;row++)
+     {
+      string id=IntegerToString(row);
+      int ry=cy+52+row*27;
+      Rect("plan_sep_"+id,x+pad,ry,inner,1,C_BORDER,C_BORDER);
+      Lbl("plan_label_"+id,x+pad,ry+5,levelName[row],levelColor[row],9);
+      Lbl("plan_value_"+id,x+PW-pad,ry+5,"-",C_TEXT,9,"Segoe UI",ANCHOR_RIGHT_UPPER);
+     }
+   cy+=154;
 
    int pw1=150, pw3=84, pw2=inner-pw1-pw3-12;
    Btn("btn_place",x+pad,cy,pw1,34,"PLACE ORDER",C_BAR_BG,C_MUTED,10);
@@ -428,13 +438,13 @@ void BuildPanel()
    cy+=48;
 
    Lbl("h_mkt",x+pad,cy,"MARKET",C_ACCENT,8,"Segoe UI Semibold");
-   cy+=16;
+   cy+=23;
    Btn("btn_buy",x+pad,cy,bw,40,"BUY",C_BUY,clrWhite,12);
    Btn("btn_sell",x+pad+bw+8,cy,bw,40,"SELL",C_SELL,clrWhite,12);
    cy+=52;
 
    Lbl("h_pend",x+pad,cy,"PENDING ORDERS",C_ACCENT,8,"Segoe UI Semibold");
-   cy+=16;
+   cy+=23;
    Btn("btn_bl",x+pad,cy,bw,32,"BUY LIMIT",C_BLIMIT,clrWhite,9);
    Btn("btn_sl",x+pad+bw+8,cy,bw,32,"SELL LIMIT",C_SLIMIT,clrWhite,9);
    cy+=38;
@@ -446,28 +456,34 @@ void BuildPanel()
    // ================= TAB 3 : MANAGE =================
    gCurTab=3;
    cy=top;
-   Lbl("h_mng",x+pad,cy,"ACTIONS",C_ACCENT,8,"Segoe UI Semibold");
-   cy+=16;
-   Btn("btn_be",x+pad,cy,bw,30,"Break-even",C_BTN,C_TEXT,9);
-   Btn("btn_part",x+pad+bw+8,cy,bw,30,"Partial close",C_BTN,C_TEXT,9);
-   cy+=36;
-   Btn("btn_cw",x+pad,cy,bw,30,"Close winners",C_BTN,C_TEXT,9);
-   Btn("btn_cl",x+pad+bw+8,cy,bw,30,"Close losers",C_BTN,C_TEXT,9);
-   cy+=36;
-   Btn("btn_close",x+pad,cy,bw,30,"Close all",C_BTN,C_TEXT,9);
-   Btn("btn_delp",x+pad+bw+8,cy,bw,30,"Delete pendings",C_BTN,C_TEXT,9);
-   cy+=44;
+   Lbl("h_mng",x+pad,cy,"Position actions",C_TEXT,10,"Segoe UI Semibold");
+   cy+=26;
+   Btn("btn_be",x+pad,cy,bw,34,"Set break-even",C_BTN,C_TEXT,9);
+   Btn("btn_part",x+pad+bw+8,cy,bw,34,"Close part ("+DoubleToString(InpPartialPct,0)+"%)",C_BTN,C_TEXT,9);
+   cy+=43;
+   Btn("btn_cw",x+pad,cy,bw,34,"Close winners",C_BTN,C_TEXT,9);
+   Btn("btn_cl",x+pad+bw+8,cy,bw,34,"Close losers",C_BTN,C_TEXT,9);
+   cy+=43;
+   Btn("btn_close",x+pad,cy,bw,34,"Close all positions",C_BSTOP,C_TEXT,9);
+   Btn("btn_delp",x+pad+bw+8,cy,bw,34,"Cancel pending orders",C_BSTOP,C_TEXT,9);
+   cy+=53;
 
-   Lbl("h_auto",x+pad,cy,"AUTOMATION",C_ACCENT,8,"Segoe UI Semibold");
-   cy+=18;
-   Rect("c5",x+pad-4,cy-4,inner+8,76,C_CARD,C_BORDER);
-   string s1="Auto break-even:  "+(InpUseBE? "ON   (at +"+IntegerToString(InpBETrigger)+" pts)" : "OFF");
-   string s2="Trailing stop:  "+(InpUseTrail? "ON   (start "+IntegerToString(InpTrailStart)+", dist "+IntegerToString(InpTrailDist)+")" : "OFF");
-   string s3="Partial close:  "+DoubleToString(InpPartialPct,0)+"% of volume";
-   Lbl("a1",x+pad+4,cy+2,s1,InpUseBE? C_ACCENT : C_MUTED,9);
-   Lbl("a2",x+pad+4,cy+24,s2,InpUseTrail? C_ACCENT : C_MUTED,9);
-   Lbl("a3",x+pad+4,cy+46,s3,C_TEXT,9);
-   cy+=84;
+   Lbl("h_auto",x+pad,cy,"Automatic protection",C_TEXT,10,"Segoe UI Semibold");
+   cy+=26;
+   Rect("c5",x+pad-4,cy,inner+8,126,C_CARD,C_BORDER);
+   Lbl("a1",x+pad+6,cy+9,"Break-even",C_TEXT,9);
+   Lbl("a1_state",x+PW-pad-6,cy+9,InpUseBE?"On":"Off",
+       InpUseBE?C_ACCENT:C_MUTED,9,"Segoe UI",ANCHOR_RIGHT_UPPER);
+   if(InpUseBE)
+      Lbl("a1_detail",x+pad+6,cy+34,"Starts at +"+IntegerToString(InpBETrigger)+" points",C_MUTED,8);
+   Rect("auto_sep",x+pad+6,cy+62,inner-12,1,C_BORDER,C_BORDER);
+   Lbl("a2",x+pad+6,cy+72,"Trailing stop",C_TEXT,9);
+   Lbl("a2_state",x+PW-pad-6,cy+72,InpUseTrail?"On":"Off",
+       InpUseTrail?C_ACCENT:C_MUTED,9,"Segoe UI",ANCHOR_RIGHT_UPPER);
+   if(InpUseTrail)
+      Lbl("a2_detail",x+pad+6,cy+97,"Start "+IntegerToString(InpTrailStart)+" pts  |  Gap "+
+          IntegerToString(InpTrailDist)+" pts",C_MUTED,8);
+   cy+=140;
    gTabH[3]=cy-y;
 
    // ================= TAB 4 : ECONOMIC NEWS =================
@@ -1463,6 +1479,7 @@ void TLine(string name,double price,color clr,int width,bool drag)
    ObjectSetInteger(0,n,OBJPROP_SELECTABLE,drag);
    ObjectSetInteger(0,n,OBJPROP_SELECTED,drag);
    ObjectSetInteger(0,n,OBJPROP_ZORDER,10);
+   ObjectSetString(0,n,OBJPROP_TOOLTIP,name=="sl"?"Stop loss":(name=="tp"?"Take profit":"Entry"));
   }
 
 void TZone(string name,double p1,double p2,color clr)
@@ -1480,21 +1497,6 @@ void TZone(string name,double p1,double p2,color clr)
    ObjectSetInteger(0,n,OBJPROP_HIDDEN,true);
   }
 
-void TText(string name,double price,string txt,color clr)
-  {
-   string n=TL+name;
-   if(ObjectFind(0,n)<0) ObjectCreate(0,n,OBJ_TEXT,0,ToolT1(),price);
-   ObjectSetInteger(0,n,OBJPROP_TIME,ToolT1());
-   ObjectSetDouble(0,n,OBJPROP_PRICE,price);
-   ObjectSetString(0,n,OBJPROP_TEXT,txt);
-   ObjectSetString(0,n,OBJPROP_FONT,"Segoe UI Semibold");
-   ObjectSetInteger(0,n,OBJPROP_FONTSIZE,9);
-   ObjectSetInteger(0,n,OBJPROP_COLOR,clr);
-   ObjectSetInteger(0,n,OBJPROP_ANCHOR,ANCHOR_LEFT_LOWER);
-   ObjectSetInteger(0,n,OBJPROP_SELECTABLE,false);
-   ObjectSetInteger(0,n,OBJPROP_HIDDEN,true);
-  }
-
 void ToolDelete()
   {
    ObjectsDeleteAll(0,TL);
@@ -1507,7 +1509,8 @@ void RefreshPlanUI()
    if(!a)
      {
       SetTxt("v_plan1","No active order plan",C_MUTED);
-      SetTxt("v_plan2","Choose an order type below, then drag SL / TP",C_MUTED);
+      SetTxt("v_plan2","Choose an order type, then drag the lines",C_MUTED);
+      for(int row=0;row<3;row++) SetTxt("plan_value_"+IntegerToString(row),"-",C_MUTED);
      }
    string bp=PFX+"btn_place", bc=PFX+"btn_cancel", bt=PFX+"btn_tp";
    ObjectSetInteger(0,bp,OBJPROP_BGCOLOR,a? C_ACCENT : C_BAR_BG);
@@ -1581,22 +1584,15 @@ void UpdateTool()
    //--- zones (TradingView-style risk / reward boxes)
    TZone("z_sl",entry,sl,InpColZoneSL);
    if(tp>0) TZone("z_tp",entry,tp,InpColZoneTP);
-   else { ObjectDelete(0,TL+"z_tp"); ObjectDelete(0,TL+"t_tp"); }
+   else ObjectDelete(0,TL+"z_tp");
 
-   //--- labels
-   if(bad!="") TText("t_e",entry,bad,C_WARN);
-   else TText("t_e",entry,OrderName(gPlanType)+"   "+DoubleToString(lot,2)+" lot"+
-         (rr>0? "   |   R:R "+DoubleToString(rr,2) : ""),C_ENTRY);
-   TText("t_sl",sl,"SL  "+DoubleToString(slPts,0)+" pts   "+Money(-risk),C_SELL);
-   if(tp>0) TText("t_tp",tp,"TP  "+DoubleToString(tpPts,0)+" pts   +"+Money(rew),C_ACCENT);
+   // Keep values in separate rows even when chart levels share a pixel.
+   SetTxt("v_plan1",OrderName(gPlanType)+"   /   "+DoubleToString(lot,2)+" lots",bad==""?C_ACCENT:C_WARN);
+   SetTxt("v_plan2",bad==""?"Reward / risk   "+DoubleToString(rr,2):bad,bad==""?C_TEXT:C_WARN);
+   SetTxt("plan_value_0",DoubleToString(entry,dg),C_ENTRY);
+   SetTxt("plan_value_1",DoubleToString(sl,dg)+"   /   "+Money(-risk),C_SELL);
+   SetTxt("plan_value_2",tp>0?DoubleToString(tp,dg)+"   /   "+Money(rew):"Required",tp>0?C_BUY:C_WARN);
 
-   //--- panel card
-   SetTxt("v_plan1",OrderName(gPlanType)+"   "+DoubleToString(lot,2)+" lot",bad==""? C_ACCENT : C_WARN);
-   if(bad=="")
-      SetTxt("v_plan2","Risk "+Money(-risk)+"   Reward "+(tp>0? "+"+Money(rew) : "-")+
-             "   R:R "+(rr>0? DoubleToString(rr,2) : "-"),C_TEXT);
-   else
-      SetTxt("v_plan2",bad,C_WARN);
    ObjectSetInteger(0,PFX+"btn_place",OBJPROP_BGCOLOR,bad==""?C_ACCENT:C_BAR_BG);
    ObjectSetInteger(0,PFX+"btn_place",OBJPROP_COLOR,bad==""?C_BG:C_MUTED);
 
@@ -1656,7 +1652,6 @@ void ToggleTP()
      {
       ObjectDelete(0,TL+"tp");
       ObjectDelete(0,TL+"z_tp");
-      ObjectDelete(0,TL+"t_tp");
      }
    RefreshPlanUI();
    UpdateTool();

@@ -37,3 +37,11 @@ assert 'Btn("btn_min"' in ea.split("gCurTab=-1;", 1)[1].split("gCurTab=-2;", 1)[
 assert "PlanRiskError(entry,sl,tp)" in entry
 assert "PlanRiskError(entry,sl,tp)" in ea.split("void UpdateTool()", 1)[1].split("void ArmPlan", 1)[0]
 print("Panel layout, restore control and shared plan validation checks passed.")
+
+# Prices at the same screen height still render in distinct, named panel rows.
+preview = ea.split("void UpdateTool()", 1)[1].split("void ArmPlan", 1)[0]
+assert '{"Entry","Stop loss","Take profit"}' in ea
+assert "int ry=cy+52+row*27;" in ea
+for row in range(3):
+    assert f'SetTxt("plan_value_{row}"' in preview
+assert "OBJ_TEXT" not in ea
