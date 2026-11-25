@@ -3,7 +3,7 @@
 //|   Risk-based sizing + market/pending orders + protection + panel |
 //+------------------------------------------------------------------+
 #property copyright "Smart Money Manager"
-#property version   "2.36"
+#property version   "2.37"
 #property description "Advanced money management EA with a modern on-chart panel."
 #property description "Market + Limit + Stop orders, drag-and-drop SL/TP chart tool, risk-% lot sizing,"
 #property description "daily loss/profit limits, drawdown guard, loss streak lock, open-risk cap,"
@@ -330,7 +330,7 @@ void BuildPanel()
    Rect("hdr",x,y,PW,52,C_HEADER,C_HEADER);
    Rect("hdr_line",x,y+52,PW,2,C_ACCENT,C_ACCENT);
    Lbl("title",x+pad,y+7,"Smart Money Manager",C_TEXT,11,"Segoe UI Semibold");
-   Lbl("sub",x+pad,y+29,_Symbol+"  |  Risk Engine v2.36",C_MUTED,8);
+   Lbl("sub",x+pad,y+29,_Symbol+"  |  Risk Engine v2.37",C_MUTED,8);
    Btn("btn_min",x+PW-38,y+10,26,26,"–",C_BTN,C_TEXT,11);
    Lbl("dot",x+PW-48,y+13,"●",C_ACCENT,14,"Segoe UI",ANCHOR_RIGHT_UPPER);
 
@@ -489,35 +489,39 @@ void BuildPanel()
    // ================= TAB 4 : ECONOMIC NEWS =================
    gCurTab=4;
    cy=top;
-   Lbl("news_head",x+pad,cy,"ECONOMIC CALENDAR",C_ACCENT,8,"Segoe UI Semibold");
-   Btn("btn_news_refresh",x+PW-pad-76,cy-3,76,22,"REFRESH",C_BTN,C_TEXT,8);
-   cy+=24;
+   Lbl("news_head",x+pad,cy,"Economic calendar",C_TEXT,10,"Segoe UI Semibold");
+   Btn("btn_news_refresh",x+PW-pad-86,cy-2,86,28,"Refresh",C_BTN,C_TEXT,8);
+   cy+=34;
    Lbl("news_status",x+pad,cy,"Loading calendar...",C_MUTED,8);
-   cy+=22;
-   Rect("news_card",x+pad-4,cy-4,inner+8,236,C_CARD,C_BORDER);
+   cy+=26;
+   int newsRow=46;
+   Rect("news_card",x+pad-4,cy,inner+8,NEWS_ROWS*newsRow,C_CARD,C_BORDER);
    for(int i=0;i<NEWS_ROWS;i++)
      {
-      int ry=cy+i*38;
-      Lbl("news_meta_"+IntegerToString(i),x+pad+6,ry+2,"-",C_WARN,8,"Segoe UI Semibold");
-      Lbl("news_title_"+IntegerToString(i),x+pad+6,ry+18,"-",C_TEXT,9);
-      if(i<NEWS_ROWS-1) Rect("news_sep_"+IntegerToString(i),x+pad+6,ry+35,inner-12,1,C_BORDER,C_BORDER);
+      int ry=cy+i*newsRow;
+      Lbl("news_meta_"+IntegerToString(i),x+pad+6,ry+5,"",C_WARN,8,"Segoe UI Semibold");
+      Lbl("news_title_"+IntegerToString(i),x+pad+6,ry+24,"",C_TEXT,9);
+      if(i<NEWS_ROWS-1) Rect("news_sep_"+IntegerToString(i),x+pad+6,ry+newsRow-1,inner-12,1,C_BORDER,C_BORDER);
      }
-   cy+=246;
+   cy+=NEWS_ROWS*newsRow+16;
 
-   Lbl("live_headlines_head",x+pad,cy,"LIVE MARKET / POLITICAL HEADLINES",C_ACCENT,8,"Segoe UI Semibold");
-   Btn("btn_headline_refresh",x+PW-pad-76,cy-3,76,22,"UPDATE",C_BTN,C_TEXT,8);
-   cy+=22;
-   Lbl("headline_status",x+pad,cy,"Loading live headlines...",C_MUTED,7);
-   cy+=18;
-   Rect("headline_card",x+pad-4,cy-4,inner+8,132,C_CARD,C_BORDER);
+   Lbl("live_headlines_head",x+pad,cy,"Live headlines",C_TEXT,10,"Segoe UI Semibold");
+   Btn("btn_headline_refresh",x+PW-pad-86,cy-2,86,28,"Update",C_BTN,C_TEXT,8);
+   cy+=34;
+   Lbl("headline_status",x+pad,cy,"Loading live headlines...",C_MUTED,8);
+   cy+=23;
+   Lbl("headline_help",x+pad,cy,"",C_MUTED,8);
+   cy+=25;
+   int headlineRow=46;
+   Rect("headline_card",x+pad-4,cy,inner+8,HEADLINE_ROWS*headlineRow,C_CARD,C_BORDER);
    for(int i=0;i<HEADLINE_ROWS;i++)
      {
-      int ry=cy+i*32;
-      Lbl("headline_title_"+IntegerToString(i),x+pad+6,ry+1,"-",C_TEXT,9);
-      Lbl("headline_meta_"+IntegerToString(i),x+pad+6,ry+17,"-",C_MUTED,8);
-      if(i<HEADLINE_ROWS-1) Rect("headline_sep_"+IntegerToString(i),x+pad+6,ry+29,inner-12,1,C_BORDER,C_BORDER);
+      int ry=cy+i*headlineRow;
+      Lbl("headline_title_"+IntegerToString(i),x+pad+6,ry+5,"",C_TEXT,9);
+      Lbl("headline_meta_"+IntegerToString(i),x+pad+6,ry+25,"",C_MUTED,8);
+      if(i<HEADLINE_ROWS-1) Rect("headline_sep_"+IntegerToString(i),x+pad+6,ry+headlineRow-1,inner-12,1,C_BORDER,C_BORDER);
      }
-   cy+=140;
+   cy+=HEADLINE_ROWS*headlineRow+12;
    gTabH[4]=cy-y;
 
    // ---------------- finish ----------------
@@ -992,34 +996,40 @@ void UpdateNewsPanel()
    SetTxt("news_status",gNewsStatus,C_MUTED);
    for(int i=0;i<NEWS_ROWS;i++)
      {
-      string meta="-";
-      string title=(i==0 && !gNewsDataOK)? "Economic calendar data is not available" : "No event";
+      string meta="";
+      string title=(i==0 && gNewsCount==0)? "No calendar events to display" : "";
       color clr=C_MUTED;
       if(i<gNewsCount)
         {
          meta=gNews[i].currency+" | "+NewsImportanceName(gNews[i].importance)+
               " | "+TimeToString(gNews[i].time,TIME_DATE|TIME_MINUTES);
          title=gNews[i].title;
-         if(StringLen(title)>58) title=StringSubstr(title,0,55)+"...";
+         if(StringLen(title)>42) title=StringSubstr(title,0,39)+"...";
          clr=NewsImportanceColor(gNews[i].importance);
         }
       SetTxt("news_meta_"+IntegerToString(i),meta,clr);
+      if(i<gNewsCount) ObjectSetString(0,PFX+"news_title_"+IntegerToString(i),OBJPROP_TOOLTIP,gNews[i].title);
       SetTxt("news_title_"+IntegerToString(i),title,(i<gNewsCount)? C_TEXT : C_MUTED);
      }
 
-   SetTxt("headline_status",gHeadlineStatus,gHeadlineDataOK? C_MUTED : C_WARN);
+   bool connectionError=StringFind(gHeadlineStatus,"GDELT connection error")==0;
+   int detailStart=StringFind(gHeadlineStatus," | ");
+   string headlineStatus=connectionError && detailStart>=0?StringSubstr(gHeadlineStatus,0,detailStart):gHeadlineStatus;
+   SetTxt("headline_status",headlineStatus,gHeadlineDataOK?C_MUTED:C_WARN);
+   SetTxt("headline_help",connectionError?"WebRequest: allow https://api.gdeltproject.org":"",C_MUTED);
    for(int i=0;i<HEADLINE_ROWS;i++)
      {
-      string title=(i==0 && !gHeadlineDataOK)? "Live news unavailable" : "No headline";
-      string meta="-";
+      string title=(i==0 && gHeadlineCount==0)? "No headlines to display" : "";
+      string meta="";
       if(i<gHeadlineCount)
         {
          title=gHeadlines[i].title;
-         if(StringLen(title)>58) title=StringSubstr(title,0,55)+"...";
+         if(StringLen(title)>42) title=StringSubstr(title,0,39)+"...";
          meta=gHeadlines[i].source;
          if(gHeadlines[i].seen!="") meta+=" | "+gHeadlines[i].seen+" UTC";
-         if(StringLen(meta)>66) meta=StringSubstr(meta,0,63)+"...";
+         if(StringLen(meta)>45) meta=StringSubstr(meta,0,42)+"...";
         }
+      if(i<gHeadlineCount) ObjectSetString(0,PFX+"headline_title_"+IntegerToString(i),OBJPROP_TOOLTIP,gHeadlines[i].title);
       SetTxt("headline_title_"+IntegerToString(i),title,i<gHeadlineCount? C_TEXT:C_MUTED);
       SetTxt("headline_meta_"+IntegerToString(i),meta,C_MUTED);
      }
