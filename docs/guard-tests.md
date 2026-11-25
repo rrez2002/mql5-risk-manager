@@ -32,3 +32,9 @@ All rows below are **pending demo verification**. Copy both source files to the 
 Demo-specific gaps include deterministic price control for the equality boundary, venue support for partial fills, and broker-specific rejection behavior. Record a scenario as untested if the demo venue cannot produce its prerequisite.
 
 For the rejection and partial-fill cases, delay an acknowledgment of a netting reduction beyond ten seconds. Check the order history for a single reduction request while its outcome is outstanding. Try a manual panel partial close during that interval. After reconciliation, confirm that any remaining reduction is based on the current volume. If the broker provides neither an identifiable order ticket nor the original request comment, that position's panel reductions can remain suspended pending manual inspection.
+
+## Panel 2.35
+
+MetaEditor Build 6316 compiled this version with zero errors and zero warnings on 2026-11-25. The source checks passed, including shared preview/submission validation, scaled widget dimensions and the placement of the restore control. A separate portable Strategy Tester launch stopped before initialization with “tester not started because the account is not specified.” No simulated trades ran.
+
+In the panel regression test, check the default scale (1.35) and compact scale (1.0) at standard and high DPI. Switch through all five tabs, minimize and reopen, then drag the SL beyond 1% and back. Verify the active-plan size, warnings and submission button state update together. Open Setup during the active plan and check that the displayed size matches the chart.

@@ -3,7 +3,7 @@
 //|   Risk-based sizing + market/pending orders + protection + panel |
 //+------------------------------------------------------------------+
 #property copyright "Smart Money Manager"
-#property version   "2.34"
+#property version   "2.35"
 #property description "Advanced money management EA with a modern on-chart panel."
 #property description "Market + Limit + Stop orders, drag-and-drop SL/TP chart tool, risk-% lot sizing,"
 #property description "daily loss/profit limits, drawdown guard, loss streak lock, open-risk cap,"
@@ -84,6 +84,7 @@ input ulong  InpMagic            = 20260512; // Magic number
 input int    InpSlippage         = 20;       // Max slippage (points)
 input bool   InpManageAllMagic   = false;    // Manage trades of all magics on this symbol
 input int    InpPanelX           = 15;       // Panel X
+input double InpPanelScale       = 1.35;     // Panel size (1.0 = compact)
 input int    InpPanelY           = 25;       // Panel Y
 
 //--- constants
@@ -188,15 +189,20 @@ void Reg(string n)
    gObjTab[k]=gCurTab;
   }
 
+int PanelPixels(int pixels)
+  {
+   return (int)MathRound(pixels*MathMax(0.85,MathMin(2.0,InpPanelScale)));
+  }
+
 void Rect(string name,int x,int y,int w,int h,color bg,color border)
   {
    string n=PFX+name;
    if(ObjectFind(0,n)<0) { ObjectCreate(0,n,OBJ_RECTANGLE_LABEL,0,0,0); Reg(n); }
    ObjectSetInteger(0,n,OBJPROP_CORNER,CORNER_LEFT_UPPER);
-   ObjectSetInteger(0,n,OBJPROP_XDISTANCE,x);
-   ObjectSetInteger(0,n,OBJPROP_YDISTANCE,y);
-   ObjectSetInteger(0,n,OBJPROP_XSIZE,w);
-   ObjectSetInteger(0,n,OBJPROP_YSIZE,h);
+   ObjectSetInteger(0,n,OBJPROP_XDISTANCE,InpPanelX+PanelPixels(x-InpPanelX));
+   ObjectSetInteger(0,n,OBJPROP_YDISTANCE,InpPanelY+PanelPixels(y-InpPanelY));
+   ObjectSetInteger(0,n,OBJPROP_XSIZE,PanelPixels(w));
+   ObjectSetInteger(0,n,OBJPROP_YSIZE,PanelPixels(h));
    ObjectSetInteger(0,n,OBJPROP_BGCOLOR,bg);
    ObjectSetInteger(0,n,OBJPROP_BORDER_TYPE,BORDER_FLAT);
    ObjectSetInteger(0,n,OBJPROP_COLOR,border);
@@ -208,7 +214,7 @@ void Rect(string name,int x,int y,int w,int h,color bg,color border)
 int PanelFontSize(int points)
   {
    long dpi=TerminalInfoInteger(TERMINAL_SCREEN_DPI);
-   return dpi>96?(int)MathMax(1,MathRound(points*96.0/dpi)):points;
+   return (int)MathMax(1,MathRound(PanelPixels(points)*96.0/MathMax(96,dpi)));
   }
 
 void Lbl(string name,int x,int y,string txt,color clr,int size=9,string font="Segoe UI",
@@ -218,8 +224,8 @@ void Lbl(string name,int x,int y,string txt,color clr,int size=9,string font="Se
    if(ObjectFind(0,n)<0) { ObjectCreate(0,n,OBJ_LABEL,0,0,0); Reg(n); }
    ObjectSetInteger(0,n,OBJPROP_CORNER,CORNER_LEFT_UPPER);
    ObjectSetInteger(0,n,OBJPROP_ANCHOR,anchor);
-   ObjectSetInteger(0,n,OBJPROP_XDISTANCE,x);
-   ObjectSetInteger(0,n,OBJPROP_YDISTANCE,y);
+   ObjectSetInteger(0,n,OBJPROP_XDISTANCE,InpPanelX+PanelPixels(x-InpPanelX));
+   ObjectSetInteger(0,n,OBJPROP_YDISTANCE,InpPanelY+PanelPixels(y-InpPanelY));
    ObjectSetString(0,n,OBJPROP_TEXT,txt);
    ObjectSetString(0,n,OBJPROP_FONT,font);
    ObjectSetInteger(0,n,OBJPROP_FONTSIZE,PanelFontSize(size));
@@ -240,10 +246,10 @@ void Btn(string name,int x,int y,int w,int h,string txt,color bg,color fg=C_TEXT
    string n=PFX+name;
    if(ObjectFind(0,n)<0) { ObjectCreate(0,n,OBJ_BUTTON,0,0,0); Reg(n); }
    ObjectSetInteger(0,n,OBJPROP_CORNER,CORNER_LEFT_UPPER);
-   ObjectSetInteger(0,n,OBJPROP_XDISTANCE,x);
-   ObjectSetInteger(0,n,OBJPROP_YDISTANCE,y);
-   ObjectSetInteger(0,n,OBJPROP_XSIZE,w);
-   ObjectSetInteger(0,n,OBJPROP_YSIZE,h);
+   ObjectSetInteger(0,n,OBJPROP_XDISTANCE,InpPanelX+PanelPixels(x-InpPanelX));
+   ObjectSetInteger(0,n,OBJPROP_YDISTANCE,InpPanelY+PanelPixels(y-InpPanelY));
+   ObjectSetInteger(0,n,OBJPROP_XSIZE,PanelPixels(w));
+   ObjectSetInteger(0,n,OBJPROP_YSIZE,PanelPixels(h));
    ObjectSetString(0,n,OBJPROP_TEXT,txt);
    ObjectSetString(0,n,OBJPROP_FONT,"Segoe UI Semibold");
    ObjectSetInteger(0,n,OBJPROP_FONTSIZE,PanelFontSize(size));
@@ -260,10 +266,10 @@ void Edt(string name,int x,int y,int w,int h,string txt)
    string n=PFX+name;
    if(ObjectFind(0,n)<0) { ObjectCreate(0,n,OBJ_EDIT,0,0,0); Reg(n); }
    ObjectSetInteger(0,n,OBJPROP_CORNER,CORNER_LEFT_UPPER);
-   ObjectSetInteger(0,n,OBJPROP_XDISTANCE,x);
-   ObjectSetInteger(0,n,OBJPROP_YDISTANCE,y);
-   ObjectSetInteger(0,n,OBJPROP_XSIZE,w);
-   ObjectSetInteger(0,n,OBJPROP_YSIZE,h);
+   ObjectSetInteger(0,n,OBJPROP_XDISTANCE,InpPanelX+PanelPixels(x-InpPanelX));
+   ObjectSetInteger(0,n,OBJPROP_YDISTANCE,InpPanelY+PanelPixels(y-InpPanelY));
+   ObjectSetInteger(0,n,OBJPROP_XSIZE,PanelPixels(w));
+   ObjectSetInteger(0,n,OBJPROP_YSIZE,PanelPixels(h));
    ObjectSetString(0,n,OBJPROP_TEXT,txt);
    ObjectSetString(0,n,OBJPROP_FONT,"Segoe UI Semibold");
    ObjectSetInteger(0,n,OBJPROP_FONTSIZE,PanelFontSize(10));
@@ -281,7 +287,7 @@ void ApplyTab()
    for(int i=0;i<ArraySize(gObjs);i++)
      {
       int tb=gObjTab[i];
-      bool vis=(!gMin) && (tb<0 || tb==gTab);
+      bool vis=gMin?tb==-1:(tb<0 || tb==gTab);
       ObjectSetInteger(0,gObjs[i],OBJPROP_TIMEFRAMES,vis? OBJ_ALL_PERIODS : OBJ_NO_PERIODS);
      }
 
@@ -296,10 +302,10 @@ void ApplyTab()
      }
 
    // status bar sits right under the active tab's content
-   int sy=InpPanelY+gTabH[gTab];
+   int sy=InpPanelY+PanelPixels(gTabH[gTab]);
    ObjectSetInteger(0,PFX+"st_bg",OBJPROP_YDISTANCE,sy);
-   ObjectSetInteger(0,PFX+"status",OBJPROP_YDISTANCE,sy+7);
-   ObjectSetInteger(0,PFX+"bg",OBJPROP_YSIZE,gMin? 48 : gTabH[gTab]+28);
+   ObjectSetInteger(0,PFX+"status",OBJPROP_YDISTANCE,sy+PanelPixels(7));
+   ObjectSetInteger(0,PFX+"bg",OBJPROP_YSIZE,PanelPixels(gMin?54:gTabH[gTab]+32));
    ObjectSetString(0,PFX+"btn_min",OBJPROP_TEXT,gMin? "+" : "–");
    ChartRedraw();
   }
@@ -313,7 +319,7 @@ void BuildPanel()
    int pad=14, inner=PW-2*pad;
    int bw=(inner-8)/2;
    int cw=(inner-12)/3;
-   int top=y+96;
+   int top=y+105;
 
    ArrayResize(gObjs,0);
    ArrayResize(gObjTab,0);
@@ -321,10 +327,10 @@ void BuildPanel()
    // ---------------- header (always visible) ----------------
    gCurTab=-1;
    Rect("bg",x,y,PW,200,C_BG,C_BORDER);
-   Rect("hdr",x,y,PW,46,C_HEADER,C_HEADER);
-   Rect("hdr_line",x,y+46,PW,2,C_ACCENT,C_ACCENT);
+   Rect("hdr",x,y,PW,52,C_HEADER,C_HEADER);
+   Rect("hdr_line",x,y+52,PW,2,C_ACCENT,C_ACCENT);
    Lbl("title",x+pad,y+7,"SMART MONEY MANAGER",C_TEXT,11,"Segoe UI Semibold");
-   Lbl("sub",x+pad,y+26,_Symbol+"  |  Risk Engine v2.34",C_MUTED,8);
+   Lbl("sub",x+pad,y+29,_Symbol+"  |  Risk Engine v2.35",C_MUTED,8);
    Btn("btn_min",x+PW-38,y+10,26,26,"–",C_BTN,C_TEXT,11);
    Lbl("dot",x+PW-48,y+13,"●",C_ACCENT,14,"Segoe UI",ANCHOR_RIGHT_UPPER);
 
@@ -333,11 +339,11 @@ void BuildPanel()
    int tw=(inner-12)/5;
    string tn[5]={"ACCOUNT","SETUP","TRADE","MANAGE","NEWS"};
    for(int k=0;k<5;k++)
-      Btn("tab_"+IntegerToString(k),x+pad+k*(tw+3),y+56,tw,26,tn[k],C_BTN,C_TEXT,8);
+      Btn("tab_"+IntegerToString(k),x+pad+k*(tw+3),y+62,tw,30,tn[k],C_BTN,C_TEXT,8);
 
    // ---------------- status bar (moved by ApplyTab) ----------------
    gCurTab=-3;
-   Rect("st_bg",x,y+300,PW,28,C_HEADER,C_HEADER);
+   Rect("st_bg",x,y+300,PW,32,C_HEADER,C_HEADER);
    Lbl("status",x+pad,y+307,gStatus,gStatusClr,9);
 
    int cy;
@@ -375,35 +381,35 @@ void BuildPanel()
    // ================= TAB 1 : SETUP =================
    gCurTab=1;
    cy=top;
-   Lbl("in_h",x+pad,cy,"TRADE SETUP",C_ACCENT,8,"Segoe UI Semibold");
+   Lbl("in_h",x+pad,cy,"ORDER DEFAULTS",C_ACCENT,8,"Segoe UI Semibold");
    cy+=18;
-   Lbl("l_risk",x+pad,cy,"Risk %",C_MUTED,8);
-   Lbl("l_sl",x+pad+cw+6,cy,"SL (pts)",C_MUTED,8);
-   Lbl("l_rr",x+pad+2*(cw+6),cy,"R : R",C_MUTED,8);
-   cy+=15;
+   Lbl("l_risk",x+pad,cy,"Risk per trade (%)",C_MUTED,8);
+   Lbl("l_sl",x+pad+cw+6,cy,"Stop loss (points)",C_MUTED,8);
+   Lbl("l_rr",x+pad+2*(cw+6),cy,"Reward / risk",C_MUTED,8);
+   cy+=19;
    Edt("e_risk",x+pad,cy,cw,26,DoubleToString(gRisk,2));
    Edt("e_sl",x+pad+cw+6,cy,cw,26,IntegerToString(gSL));
    Edt("e_rr",x+pad+2*(cw+6),cy,cw,26,DoubleToString(gRR,1));
    cy+=34;
-   Lbl("l_dist",x+pad,cy,"Pending dist (pts)",C_MUTED,8);
+   Lbl("l_dist",x+pad,cy,"Entry gap (points)",C_MUTED,8);
    Lbl("l_exp",x+pad+cw+6,cy,"Expiry (min)",C_MUTED,8);
-   Lbl("l_lot",x+pad+2*(cw+6),cy,"Lot (0=auto)",C_MUTED,8);
-   cy+=15;
+   Lbl("l_lot",x+pad+2*(cw+6),cy,"Lots (0 = auto)",C_MUTED,8);
+   cy+=19;
    Edt("e_dist",x+pad,cy,cw,26,IntegerToString(gDist));
    Edt("e_exp",x+pad+cw+6,cy,cw,26,IntegerToString(gExpiry));
    Edt("e_lot",x+pad+2*(cw+6),cy,cw,26,DoubleToString(gLotFix,2));
    cy+=40;
 
-   Rect("c2",x+pad-4,cy-4,inner+8,56,C_CARD,C_BORDER);
+   Rect("c2",x+pad-4,cy-4,inner+8,76,C_CARD,C_BORDER);
    Lbl("k_lot",x+pad+4,cy+2,"Position size",C_MUTED,9);
    Lbl("v_lot",x+PW-pad-4,cy,"-",C_ACCENT,12,"Segoe UI Semibold",ANCHOR_RIGHT_UPPER);
    Lbl("k_rk",x+pad+4,cy+28,"Risk",C_MUTED,9);
-   Lbl("v_rk",x+pad+50,cy+27,"-",C_SELL,9,"Segoe UI Semibold");
-   Lbl("k_rw",x+PW/2+10,cy+28,"Reward",C_MUTED,9);
-   Lbl("v_rw",x+PW-pad-4,cy+27,"-",C_BUY,9,"Segoe UI Semibold",ANCHOR_RIGHT_UPPER);
-   cy+=68;
+   Lbl("v_rk",x+PW-pad-4,cy+27,"-",C_SELL,9,"Segoe UI Semibold",ANCHOR_RIGHT_UPPER);
+   Lbl("k_rw",x+pad+4,cy+49,"Reward",C_MUTED,9);
+   Lbl("v_rw",x+PW-pad-4,cy+48,"-",C_BUY,9,"Segoe UI Semibold",ANCHOR_RIGHT_UPPER);
+   cy+=88;
 
-   Btn("btn_tool",x+pad,cy,inner,28,gUseTool? "Chart tool (drag SL / TP): ON" : "Chart tool (drag SL / TP): OFF",C_BTN,gUseTool? C_ENTRY : C_MUTED,9);
+   Btn("btn_tool",x+pad,cy,inner,28,gUseTool? "Order mode: preview and confirm" : "Order mode: send on click",C_BTN,gUseTool? C_ENTRY : C_MUTED,9);
    cy+=40;
    gTabH[1]=cy-y;
 
@@ -415,7 +421,7 @@ void BuildPanel()
    Lbl("v_plan2",x+pad+4,cy+26,"Choose an order type below, then drag SL / TP",C_MUTED,8);
    cy+=62;
 
-   int pw1=150, pw3=68, pw2=inner-pw1-pw3-12;
+   int pw1=150, pw3=84, pw2=inner-pw1-pw3-12;
    Btn("btn_place",x+pad,cy,pw1,34,"PLACE ORDER",C_BAR_BG,C_MUTED,10);
    Btn("btn_cancel",x+pad+pw1+6,cy,pw2,34,"CANCEL",C_BAR_BG,C_MUTED,9);
    Btn("btn_tp",x+pad+pw1+pw2+12,cy,pw3,34,"TP ON",C_BAR_BG,C_MUTED,9);
@@ -566,11 +572,6 @@ double CalcLotPts(double pts)
    double lpl=LossPerLot(pts);
    if(lpl<=0) return 0;
    return NormalizeLot(RiskMoney()/lpl);
-  }
-
-double CalcLot()
-  {
-   return CalcLotPts(gSL);
   }
 
 //+------------------------------------------------------------------+
@@ -1596,6 +1597,8 @@ void UpdateTool()
              "   R:R "+(rr>0? DoubleToString(rr,2) : "-"),C_TEXT);
    else
       SetTxt("v_plan2",bad,C_WARN);
+   ObjectSetInteger(0,PFX+"btn_place",OBJPROP_BGCOLOR,bad==""?C_ACCENT:C_BAR_BG);
+   ObjectSetInteger(0,PFX+"btn_place",OBJPROP_COLOR,bad==""?C_BG:C_MUTED);
 
    ChartRedraw();
   }
@@ -1725,14 +1728,14 @@ void UpdatePanel()
    double lossPct=(today<0)? -today/dayStart*100.0 : 0;
    double use=(InpMaxDailyLossPct>0)? MathMin(1.0,lossPct/InpMaxDailyLossPct) : 0;
    color bc=use<0.5? C_ACCENT : (use<0.8? C_WARN : C_SELL);
-   ObjectSetInteger(0,PFX+"bar_fg",OBJPROP_XSIZE,MathMax(1,(int)(inner*use)));
+   ObjectSetInteger(0,PFX+"bar_fg",OBJPROP_XSIZE,MathMax(1,PanelPixels((int)(inner*use))));
    ObjectSetInteger(0,PFX+"bar_fg",OBJPROP_BGCOLOR,bc);
    ObjectSetInteger(0,PFX+"bar_fg",OBJPROP_COLOR,bc);
    SetTxt("bar_v",DoubleToString(lossPct,2)+"% / "+DoubleToString(InpMaxDailyLossPct,1)+"%",bc);
 
    double duse=(InpMaxDrawdownPct>0)? MathMin(1.0,ddPct/InpMaxDrawdownPct) : 0;
    color dc=duse<0.5? C_ACCENT : (duse<0.8? C_WARN : C_SELL);
-   ObjectSetInteger(0,PFX+"dd_fg",OBJPROP_XSIZE,MathMax(1,(int)(inner*duse)));
+   ObjectSetInteger(0,PFX+"dd_fg",OBJPROP_XSIZE,MathMax(1,PanelPixels((int)(inner*duse))));
    ObjectSetInteger(0,PFX+"dd_fg",OBJPROP_BGCOLOR,dc);
    ObjectSetInteger(0,PFX+"dd_fg",OBJPROP_COLOR,dc);
    SetTxt("dd_v",DoubleToString(ddPct,2)+"% / "+DoubleToString(InpMaxDrawdownPct,1)+"%",dc);
@@ -1747,6 +1750,7 @@ void UpdatePanel()
       tpPts=tp>0?MathAbs(tp-e)/_Point:0;
      }
    double lot=CalcLotPts(slPts);
+   SetTxt("k_lot",gArmed?"Active plan size":"Default position size",C_MUTED);
    SetTxt("v_lot",DoubleToString(lot,2)+" lot",C_ACCENT);
    SetTxt("v_rk",Money(lot*LossPerLot(slPts)),C_SELL);
    SetTxt("v_rw",tpPts>0? Money(lot*ProfitPerLot(tpPts)) : "-",C_BUY);
@@ -1845,8 +1849,8 @@ void OnTimer()
    if(cnt%240==0) RefreshNews();   // every 60 s
    int headlineTicks=MathMax(1,MathMin(60,InpHeadlineRefreshMinutes))*240;
    if(cnt%headlineTicks==0) RefreshHeadlines();
-   UpdateTool();                   // every 250 ms
    if(cnt%4==0) UpdatePanel();     // every 1 s
+   UpdateTool();                   // every 250 ms
   }
 
 void OnTradeTransaction(const MqlTradeTransaction &trans,
@@ -1885,7 +1889,7 @@ void OnChartEvent(const int id,const long &lparam,const double &dparam,const str
       else if(sparam==PFX+"btn_tool")
         {
          gUseTool=!gUseTool;
-         ObjectSetString(0,PFX+"btn_tool",OBJPROP_TEXT,gUseTool? "Chart tool (drag SL / TP): ON" : "Chart tool (drag SL / TP): OFF");
+         ObjectSetString(0,PFX+"btn_tool",OBJPROP_TEXT,gUseTool? "Order mode: preview and confirm" : "Order mode: send on click");
          ObjectSetInteger(0,PFX+"btn_tool",OBJPROP_COLOR,gUseTool? C_ENTRY : C_MUTED);
          if(!gUseTool && gArmed) DisarmPlan();
         }
