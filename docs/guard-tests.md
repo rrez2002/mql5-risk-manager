@@ -32,3 +32,23 @@ All rows below are **pending demo verification**. Copy both source files to the 
 Demo-specific gaps include deterministic price control for the equality boundary, venue support for partial fills, and broker-specific rejection behavior. Record a scenario as untested if the demo venue cannot produce its prerequisite.
 
 For the rejection and partial-fill cases, delay an acknowledgment of a netting reduction beyond ten seconds. Check the order history for a single reduction request while its outcome is outstanding. Try a manual panel partial close during that interval. After reconciliation, confirm that any remaining reduction is based on the current volume. If the broker provides neither an identifiable order ticket nor the original request comment, that position's panel reductions can remain suspended pending manual inspection.
+
+## Panel 2.35
+
+MetaEditor Build 6316 compiled this version with zero errors and zero warnings on 2026-11-25. The source checks passed, including shared preview/submission validation, scaled widget dimensions and the placement of the restore control. A separate portable Strategy Tester launch stopped before initialization with “tester not started because the account is not specified.” No simulated trades ran.
+
+In the panel regression test, check the default scale (1.35) and compact scale (1.0) at standard and high DPI. Switch through all five tabs, minimize and reopen, then drag the SL beyond 1% and back. Verify the active-plan size, warnings and submission button state update together. Open Setup during the active plan and check that the displayed size matches the chart.
+
+## Panel 2.38
+
+The source audit covered all five tabs, six order actions, minimize/restore and the Calendar and Live headlines views. Build 6316 compilation completed with zero errors and warnings. A non-trading preview script compiled and loaded in a separate terminal, but produced no screenshots. The visual checks below remain pending.
+
+| Tab | Visual check |
+|---|---|
+| Account | Balance and equity values align with their rows. Optional limits are labelled separately from the account guard status. |
+| Setup | Change a default and switch tabs. Confirm its value stays with its label. Compare the active plan size with Trade. |
+| Trade | Draw SL and entry close together. Confirm the three price rows remain distinct, and cancel the preview without placing an order. |
+| Manage | Check that position action buttons and automatic protection settings are clearly separated. |
+| News | Switch between Calendar and Live headlines. Verify the proper list and refresh button are visible, including the separate WebRequest message when the endpoint is blocked. |
+
+Run at default scale and 1.0, then minimize and restore. Use a demo account for any action that sends a request.

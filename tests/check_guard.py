@@ -23,3 +23,35 @@ assert reduction.index("RequestOutstanding(requestKey)") < reduction.index("Orde
 assert reduction.index('Save(requestKey+"sending",(double)token)') < reduction.index("OrderSend(req,res)")
 assert "req.volume=part" in reduction and "PositionClose(t" not in reduction
 assert 'if(automatic && !RetrySlot' in reduction
+
+# All ordinary panel widgets and its dynamically resized bars use the same scale.
+assert "InpPanelScale       = 1.35" in ea
+for start, end in (("void Rect(", "int PanelFontSize("), ("void Btn(", "void Edt("),
+                   ("void Edt(", "void ApplyTab(")):
+    widget = ea.split(start, 1)[1].split(end, 1)[0]
+    assert "PanelPixels(w)" in widget and "PanelPixels(h)" in widget
+assert "PanelPixels((int)(inner*use))" in ea
+assert "PanelPixels((int)(inner*duse))" in ea
+assert "if(gCurTab==-1) return;" in ea
+assert 'Btn("btn_min"' in ea.split("gCurTab=-1;", 1)[1].split("gCurTab=-2;", 1)[0]
+assert "PlanRiskError(entry,sl,tp)" in entry
+assert "PlanRiskError(entry,sl,tp)" in ea.split("void UpdateTool()", 1)[1].split("void ArmPlan", 1)[0]
+print("Panel layout, restore control and shared plan validation checks passed.")
+
+# Prices at the same screen height still render in distinct, named panel rows.
+preview = ea.split("void UpdateTool()", 1)[1].split("void ArmPlan", 1)[0]
+assert '{"Entry","Stop loss","Take profit"}' in ea
+assert "int ry=cy+52+row*27;" in ea
+for row in range(3):
+    assert f'SetTxt("plan_value_{row}"' in preview
+assert "OBJ_TEXT" not in ea
+
+# The five primary tabs remain routed, and News has two independent views.
+assert '{"Account","Setup","Trade","Manage","News"}' in ea
+for page in range(6):
+    assert f"gTabH[{page}]=cy-y;" in ea
+assert "int page=gTab==4 && gShowHeadlines?5:gTab;" in ea
+assert "tb==page || (tb==6 && gTab==4)" in ea
+for view in ("view_calendar", "view_headlines"):
+    assert f'Btn("{view}"' in ea and f'sparam==PFX+"{view}"' in ea
+print("Five tabs and both news views passed routing checks.")
