@@ -7,7 +7,7 @@ Risk-based position sizing · market & pending orders · on-chart SL/TP preview 
 
 ![Platform](https://img.shields.io/badge/platform-MetaTrader%205-1f6feb?style=for-the-badge)
 ![Language](https://img.shields.io/badge/language-MQL5-00b894?style=for-the-badge)
-![Version](https://img.shields.io/badge/version-2.37-8957e5?style=for-the-badge)
+![Version](https://img.shields.io/badge/version-2.38-8957e5?style=for-the-badge)
 ![License](https://img.shields.io/badge/license-MIT-f0883e?style=for-the-badge)
 
 **English** · [فارسی](README.fa.md)

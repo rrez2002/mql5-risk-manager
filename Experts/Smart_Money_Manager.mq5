@@ -3,7 +3,7 @@
 //|   Risk-based sizing + market/pending orders + protection + panel |
 //+------------------------------------------------------------------+
 #property copyright "Smart Money Manager"
-#property version   "2.37"
+#property version   "2.38"
 #property description "Advanced money management EA with a modern on-chart panel."
 #property description "Market + Limit + Stop orders, drag-and-drop SL/TP chart tool, risk-% lot sizing,"
 #property description "daily loss/profit limits, drawdown guard, loss streak lock, open-risk cap,"
@@ -129,7 +129,8 @@ int    gPanelH     = 0;
 bool   gMin        = false;
 int    gTab        = 0;      // active tab: 0 Account, 1 Setup, 2 Trade, 3 Manage, 4 News
 int    gCurTab     = -1;     // tab currently being built
-int    gTabH[5];             // panel height per tab
+bool   gShowHeadlines=false;
+int    gTabH[6];             // panel height per tab
 string gObjs[];              // registered panel objects
 int    gObjTab[];            // tab index of each registered object
 bool   gUseTool    = true;   // chart tool on/off
@@ -284,10 +285,11 @@ void Edt(string name,int x,int y,int w,int h,string txt)
 //--- apply visibility + layout for the current tab (and minimize state)
 void ApplyTab()
   {
+   int page=gTab==4 && gShowHeadlines?5:gTab;
    for(int i=0;i<ArraySize(gObjs);i++)
      {
       int tb=gObjTab[i];
-      bool vis=gMin?tb==-1:(tb<0 || tb==gTab);
+      bool vis=gMin?tb==-1:(tb<0 || tb==page || (tb==6 && gTab==4));
       ObjectSetInteger(0,gObjs[i],OBJPROP_TIMEFRAMES,vis? OBJ_ALL_PERIODS : OBJ_NO_PERIODS);
      }
 
@@ -301,11 +303,20 @@ void ApplyTab()
       ObjectSetInteger(0,n,OBJPROP_COLOR,(k==gTab)? C_BG : C_TEXT);
      }
 
+   string viewButtons[2]={"view_calendar","view_headlines"};
+   for(int i=0;i<2;i++)
+     {
+      string n=PFX+viewButtons[i];
+      bool active=(i==1)==gShowHeadlines;
+      ObjectSetInteger(0,n,OBJPROP_BGCOLOR,active?C_ACCENT:C_BTN);
+      ObjectSetInteger(0,n,OBJPROP_COLOR,active?C_BG:C_TEXT);
+     }
+
    // status bar sits right under the active tab's content
-   int sy=InpPanelY+PanelPixels(gTabH[gTab]);
+   int sy=InpPanelY+PanelPixels(gTabH[page]);
    ObjectSetInteger(0,PFX+"st_bg",OBJPROP_YDISTANCE,sy);
    ObjectSetInteger(0,PFX+"status",OBJPROP_YDISTANCE,sy+PanelPixels(7));
-   ObjectSetInteger(0,PFX+"bg",OBJPROP_YSIZE,PanelPixels(gMin?54:gTabH[gTab]+32));
+   ObjectSetInteger(0,PFX+"bg",OBJPROP_YSIZE,PanelPixels(gMin?54:gTabH[page]+32));
    ObjectSetString(0,PFX+"btn_min",OBJPROP_TEXT,gMin? "+" : "–");
    ChartRedraw();
   }
@@ -330,7 +341,7 @@ void BuildPanel()
    Rect("hdr",x,y,PW,52,C_HEADER,C_HEADER);
    Rect("hdr_line",x,y+52,PW,2,C_ACCENT,C_ACCENT);
    Lbl("title",x+pad,y+7,"Smart Money Manager",C_TEXT,11,"Segoe UI Semibold");
-   Lbl("sub",x+pad,y+29,_Symbol+"  |  Risk Engine v2.37",C_MUTED,8);
+   Lbl("sub",x+pad,y+29,_Symbol+"  |  Risk Engine v2.38",C_MUTED,8);
    Btn("btn_min",x+PW-38,y+10,26,26,"–",C_BTN,C_TEXT,11);
    Lbl("dot",x+PW-48,y+13,"●",C_ACCENT,14,"Segoe UI",ANCHOR_RIGHT_UPPER);
 
@@ -360,13 +371,13 @@ void BuildPanel()
      }
    cy+=128;
 
-   Lbl("bar_t",x+pad,cy,"Daily loss limit",C_MUTED,8);
+   Lbl("bar_t",x+pad,cy,"Optional daily loss limit",C_MUTED,8);
    Lbl("bar_v",x+PW-pad,cy,"0%",C_MUTED,8,"Segoe UI",ANCHOR_RIGHT_UPPER);
    Rect("bar_bg",x+pad,cy+18,inner,8,C_BAR_BG,C_BAR_BG);
    Rect("bar_fg",x+pad,cy+18,1,8,C_ACCENT,C_ACCENT);
    cy+=38;
 
-   Lbl("dd_t",x+pad,cy,"Drawdown from peak",C_MUTED,8);
+   Lbl("dd_t",x+pad,cy,"Optional peak drawdown",C_MUTED,8);
    Lbl("dd_v",x+PW-pad,cy,"0%",C_MUTED,8,"Segoe UI",ANCHOR_RIGHT_UPPER);
    Rect("dd_bg",x+pad,cy+18,inner,8,C_BAR_BG,C_BAR_BG);
    Rect("dd_fg",x+pad,cy+18,1,8,C_ACCENT,C_ACCENT);
@@ -486,9 +497,12 @@ void BuildPanel()
    cy+=140;
    gTabH[3]=cy-y;
 
-   // ================= TAB 4 : ECONOMIC NEWS =================
+   // News views share navigation and occupy the same area.
+   gCurTab=6;
+   Btn("view_calendar",x+pad,top,bw,30,"Calendar",C_BTN,C_TEXT,9);
+   Btn("view_headlines",x+pad+bw+8,top,bw,30,"Live headlines",C_BTN,C_TEXT,9);
    gCurTab=4;
-   cy=top;
+   cy=top+44;
    Lbl("news_head",x+pad,cy,"Economic calendar",C_TEXT,10,"Segoe UI Semibold");
    Btn("btn_news_refresh",x+PW-pad-86,cy-2,86,28,"Refresh",C_BTN,C_TEXT,8);
    cy+=34;
@@ -503,7 +517,11 @@ void BuildPanel()
       Lbl("news_title_"+IntegerToString(i),x+pad+6,ry+24,"",C_TEXT,9);
       if(i<NEWS_ROWS-1) Rect("news_sep_"+IntegerToString(i),x+pad+6,ry+newsRow-1,inner-12,1,C_BORDER,C_BORDER);
      }
-   cy+=NEWS_ROWS*newsRow+16;
+   cy+=NEWS_ROWS*newsRow+12;
+   gTabH[4]=cy-y;
+
+   gCurTab=5;
+   cy=top+44;
 
    Lbl("live_headlines_head",x+pad,cy,"Live headlines",C_TEXT,10,"Segoe UI Semibold");
    Btn("btn_headline_refresh",x+PW-pad-86,cy-2,86,28,"Update",C_BTN,C_TEXT,8);
@@ -522,7 +540,7 @@ void BuildPanel()
       if(i<HEADLINE_ROWS-1) Rect("headline_sep_"+IntegerToString(i),x+pad+6,ry+headlineRow-1,inner-12,1,C_BORDER,C_BORDER);
      }
    cy+=HEADLINE_ROWS*headlineRow+12;
-   gTabH[4]=cy-y;
+   gTabH[5]=cy-y;
 
    // ---------------- finish ----------------
    gCurTab=-1;
@@ -1879,6 +1897,11 @@ void OnChartEvent(const int id,const long &lparam,const double &dparam,const str
       else if(StringFind(sparam,PFX+"tab_")==0)
         {
          gTab=(int)StringToInteger(StringSubstr(sparam,StringLen(PFX)+4,1));
+         ApplyTab();
+        }
+      else if(sparam==PFX+"view_calendar" || sparam==PFX+"view_headlines")
+        {
+         gShowHeadlines=(sparam==PFX+"view_headlines");
          ApplyTab();
         }
       else if(sparam==PFX+"btn_news_refresh")
